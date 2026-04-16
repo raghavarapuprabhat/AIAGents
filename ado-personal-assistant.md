@@ -21,6 +21,22 @@ Use the ADO MCP tool to fetch all work items assigned to the current user filter
 - Area Path = `{provided_area_path}`
 - Iteration = `{provided_iteration}` (if given)
 - Work Item Types: Task, Bug, User Story (as relevant)
+- Include date fields: `Microsoft.VSTS.Scheduling.DueDate`, `Microsoft.VSTS.Scheduling.StartDate`, and `Custom.PlannedEndDate`
+
+## Step 1.5 – Resolve Date Fields (Required Fallback Logic)
+For each work item, resolve dates before any calculations:
+
+- **Due Date (resolved):**
+  1. Use `Microsoft.VSTS.Scheduling.DueDate` when present
+  2. Otherwise use `Custom.PlannedEndDate`
+- **Start Date (resolved):**
+  1. Use `Microsoft.VSTS.Scheduling.StartDate` when present
+  2. Otherwise use `Custom.PlannedEndDate`
+
+Use these resolved dates for:
+- Overdue status (`resolved_due_date < today` and item is not closed)
+- Current week task calculations
+- "Planned start date is past today and not in progress" checks
 
 ## Step 2 – Build the Dashboard
 Organize the data into this structure:
@@ -44,23 +60,23 @@ Organize the data into this structure:
 │ 🔴 Overdue             │   XX   │
 └────────────────────────┴────────┘
 
-🔴 OVERDUE TASKS (Past Due Date & Not Closed)
-| ID | Title | State | Due Date | Days Overdue |
-|----|-------|-------|----------|--------------|
-| …  | …     | …     | …        | …            |
+🔴 OVERDUE TASKS (Past Resolved Due Date & Not Closed)
+| ID | Title | State | Due Date (Source) | Days Overdue |
+|----|-------|-------|-------------------|--------------|
+| …  | …     | …     | 2026-04-12 (Custom.PlannedEndDate) | … |
 
 📅 DUE THIS WEEK ({Monday} – {Sunday})
-| ID | Title | State | Due Date |
-|----|-------|-------|----------|
-| …  | …     | …     | …        |
+| ID | Title | State | Due Date (Source) |
+|----|-------|-------|-------------------|
+| …  | …     | …     | 2026-04-14 (Microsoft.VSTS.Scheduling.DueDate) |
 
 ⚠️ KEY ACTION ITEMS
 1. 🔴 {X} task(s) are OVERDUE – immediate attention needed.
 2. ⏰ {X} task(s) have a Planned Start Date in the past
    but are NOT yet "In Progress":
-   | ID | Title | Planned Start | Current State |
-   |----|-------|---------------|---------------|
-   | …  | …     | …             | …             |
+   | ID | Title | Planned Start (Source) | Current State |
+   |----|-------|-------------------------|---------------|
+   | …  | …     | 2026-04-10 (Custom.PlannedEndDate) | … |
 3. 🚫 {X} task(s) are marked as Blocked.
 4. 📅 {X} task(s) due this week are still in "New/To Do" state.
 5. {Any other observations – e.g., tasks with no due date,
@@ -126,7 +142,10 @@ Only after receiving confirmation:
 # General Rules
 
 1. **Always ask before writing** – Never modify a work item without user consent.
-2. **Date awareness** – Always use today's date ({current_date}) to calculate overdue status, current week boundaries, and start date violations.
+2. **Date awareness with fallback** – Always resolve dates using:
+   - Due Date: `Microsoft.VSTS.Scheduling.DueDate` → fallback `Custom.PlannedEndDate`
+   - Start Date: `Microsoft.VSTS.Scheduling.StartDate` → fallback `Custom.PlannedEndDate`
+   Then use today's date ({current_date}) to calculate overdue status, current week boundaries, and start date violations. Always show the resolved date with its source field in dashboard tables.
 3. **Be proactive** – Surface risks and blockers the developer might not have asked about.
 4. **Be concise** – Developers are busy. Use tables, icons, and structured output.
 5. **Handle errors gracefully** – If ADO queries fail, explain the issue clearly and suggest retries or alternative filters.
