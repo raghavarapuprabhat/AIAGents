@@ -1,0 +1,677 @@
+# StraightBank DAP ("Compass") — Low-Level Design & Implementation Specification
+
+**Audience:** Implementation engineers / AI-assisted development (Claude/Sonnet)
+**Parent document:** StraightBank-DAP-Architecture v1.0 (HLD). Section references (§) point there.
+**Rule zero:** The browser agent ships with **zero third-party runtime dependencies**. TypeScript stdlib + DOM APIs only. Server-side services may use bank-approved OSS.
+
+---
+
+## 0. How to use this document
+
+Each numbered part is independently implementable and ends with **Acceptance Criteria (AC)**. Build order: Part 1 (schemas) → Part 2 (agent) → Part 3 (services) → Part 4 (Studio) → Part 5 (analytics) → Part 6 (test harness). Every PR must reference the LLD section it implements. Anything ambiguous: prefer the fail-open interpretation (§ HLD AD-06) and raise an ADR.
+
+## 0.1 Monorepo layout
+
+```
+compass/
+├── packages/
+│   ├── agent/                 # browser runtime (zero-dep TypeScript)
+│   │   ├── src/
+│   │   │   ├── loader/        # <2KB inline loader
+│   │   │   ├── kernel/        # boot, error boundary, event bus, SPA detection
+│   │   │   ├── anchoring/     # fingerprint capture-free runtime resolver
+│   │   │   ├── positioning/   # placement engine
+│   │   │   ├── backdrop/      # spotlight/dim/block (§5.3.1)
+│   │   │   ├── widgets/       # flows, tips, launchers, announcements, surveys, assist
+│   │   │   ├── engine/        # walk-thru FSM
+│   │   │   ├── targeting/     # rule bytecode interpreter
+│   │   │   ├── i18n/          # locale resolution, direction
+│   │   │   ├── beacon/        # analytics batching
+│   │   │   ├── storage/       # namespaced session/localStorage wrapper
+│   │   │   └── verify/        # bundle signature verification (WebCrypto Ed25519)
+│   │   └── test/
+│   ├── schemas/               # single source of truth: JSON Schema + TS types (generated)
+│   ├── rulec/                 # rule compiler: rule tree JSON -> bytecode (shared node lib)
+│   ├── services/
+│   │   ├── delivery/          # manifest + bundle serving
+│   │   ├── content/           # CRUD, workflow, publish pipeline, media
+│   │   ├── targeting/         # segment mgmt + server-side eval
+│   │   ├── identity-adapter/  # context token mint/verify
+│   │   ├── collector/         # ingestion + spool + CH writer
+│   │   └── admin/             # tenants, RBAC, audit query, kill switch
+│   ├── studio-extension/      # MV3 browser extension
+│   ├── studio-console/        # React web console
+│   └── gallery/               # hostile page gallery + Playwright suites
+├── infra/                     # Helm charts, Argo CD apps, ClickHouse/PG migrations
+└── docs/adr/
+```
+
+Tooling: pnpm workspaces for browser-side packages; TypeScript 5.x strict; esbuild for the agent (single IIFE bundle, no code-splitting in v1 — total budget governs); **backend services: Java 21 + Spring Boot 3, Maven multi-module under `services/` (see Part 3 conventions and Part 10 for the migration from the initially generated Node/NestJS implementation)**; Vitest unit tests (TS), JUnit 5 + Testcontainers (Java); Playwright e2e.
+
+> **Note for teams holding a generated Node/NestJS backend from LLD v1.x:** the HTTP contracts, database schemas, bundle formats, and bytecode in this document are unchanged. Part 10 defines the decoupling seams and the service-by-service replacement path — do not big-bang rewrite.
+
+---
+
+# PART 1 — Canonical Schemas (`packages/schemas`)
+
+All wire and storage formats are defined once as JSON Schema (draft 2020-12) with TS types generated via `json-schema-to-typescript`. Schema files below are normative.
+
+## 1.1 Bundle manifest (`manifest.schema.json`)
+
+Served at `GET /d/{tenant}/{env}/manifest.json`, TTL 60s.
+
+```json
+{
+  "schema": 1,
+  "tenant": "straightbank-web",
+  "env": "prod",
+  "agent_min": "1.0.0",
+  "kill": false,
+  "locales": ["en", "ar"],
+  "bundles": { "en": "bundle-3f9c…e2.json", "ar": "bundle-77ab…09.json" },
+  "sig_key_id": "compass-2026-01"
+}
+```
+
+Rules: `kill:true` ⇒ agent unloads all UI and stops (checked on every manifest refresh, 60s cadence). `agent_min` greater than running agent version ⇒ agent no-ops and emits `agent_error{code:"AGENT_STALE"}` once per session.
+
+## 1.2 Content bundle (`bundle.schema.json`)
+
+Immutable, content-addressed, detached-signed.
+
+```json
+{
+  "schema": 1,
+  "tenant": "straightbank-web",
+  "env": "prod",
+  "locale": "en",
+  "generated_at": "2026-07-15T08:00:00Z",
+  "theme": { "primary": "#0A4EA2", "radius": "8px", "font": "inherit", "z_base": 2147480000 },
+  "assets_base": "/d/straightbank-web/assets/",
+  "segments": { "seg_new_joiners": { "bc": "<base64 bytecode>" } },
+  "guides": [ { "$ref": "guide.schema.json" } ],
+  "signature": { "alg": "Ed25519", "key_id": "compass-2026-01", "sig": "<base64 over canonical JSON minus signature field>" }
+}
+```
+
+Canonicalization: JCS (RFC 8785). The agent verifies with WebCrypto against the pinned public key map compiled into the agent build (`verify/keys.ts`). Verification failure ⇒ treat as no content + `agent_error{code:"BUNDLE_SIG_FAIL"}`.
+
+## 1.3 Guide definition (`guide.schema.json`) — abridged, normative fields
+
+```jsonc
+{
+  "id": "gd_x7k2",                 // ULID-derived, immutable
+  "type": "flow" | "tip" | "launcher" | "announcement" | "survey" | "deeplink" | "assist_item",
+  "version": 14,
+  "name": "First international transfer",
+  "targeting": { "segment": "seg_new_joiners", "pages": ["/payments/intl*"], "schedule": {"from": null, "to": null}, "frequency": {"policy": "once_per_version", "snooze_days": 7} },
+  "trigger": { "kind": "launcher" | "auto" | "deeplink" | "event", "ref": "gd_launcher_1", "event": null },
+  "placement_mode": "overlay" | "inline",              // inline: launcher/announcement only (§5.7)
+  "inline": { "container": "anch_9f2c", "position": "last_child", "envelope": {"w": 160, "h": 36} },
+  "steps": [ { "$ref": "step.schema.json" } ]
+}
+```
+
+## 1.4 Step (`step.schema.json`)
+
+```jsonc
+{
+  "id": "s1",
+  "anchor": "anch_9f2c",                     // key into fingerprint table (1.5)
+  "content": { "title_key": "t.s1.title", "body": [/* rich-text AST, 1.6 */] },
+  "placement": "bottom-center",              // 12 logical placements
+  "backdrop": "none" | "dim" | "block",      // §5.3.1
+  "advance": [                                // ordered transition list (FSM edges)
+    { "on": "click", "target": "anchor", "goto": "s2" },
+    { "on": "element_gone", "target": "anchor", "goto": "@fallback" },
+    { "on": "next_button", "goto": "s2" }
+  ],
+  "branch": [ { "if_bc": "<base64 bytecode>", "goto": "s1b" } ],
+  "wait": { "for": "element_visible", "target": "anch_ok", "timeout_ms": 8000, "on_timeout": "@skip" },
+  "buttons": { "next": true, "back": true, "exit": true }
+}
+```
+
+Reserved goto targets: `@next`, `@back`, `@skip` (skip step, continue), `@fallback` (guide-level fallback step id or `@end`), `@end`.
+
+## 1.5 Anchor fingerprint (`anchor.schema.json`)
+
+```jsonc
+{
+  "id": "anch_9f2c",
+  "frame_path": [],                       // e.g. ["#legacyFrame"] for same-origin iframe hops
+  "signals": {
+    "attr_id": "transfer-btn",            // weight 40
+    "data_guide": "submit-transfer",      // weight 45
+    "aria": { "role": "button", "name": "Submit transfer" },   // weight 25
+    "tag": "button",                      // weight 5
+    "classes": ["btn", "btn-primary"],    // stable subset only, weight 10
+    "text": "submit transfer",            // normalized (trim/lower/collapse-ws), weight 15
+    "label_for": null,
+    "path": ["form#pay", "div:nth-of-type(2)", "button"],       // weight 10
+    "geometry": { "quadrant": "br", "w_band": [80,200], "h_band": [24,48] }  // weight 5, tie-breaker
+  },
+  "captured_at": "2026-07-01T…", "captured_url": "/payments/intl"
+}
+```
+
+## 1.6 Rich-text AST (author content — no HTML ever)
+
+Node union (closed): `{t:"p",c:[…]}`, `{t:"txt",v:"…"}`, `{t:"b"|"i"|"u",c:[…]}`, `{t:"ul"|"ol",c:[{t:"li",c:[…]}]}`, `{t:"a",href:"…",c:[…]}` (href must match tenant allow-list at compile time), `{t:"img",asset:"img_<sha256>",alt:"…",w:int,h:int}` (asset must exist in tenant media store; alt mandatory), `{t:"br"}`. Renderer builds DOM via `createElement`/`textContent` exclusively. Unknown node type ⇒ skip node, emit `agent_error{code:"AST_UNKNOWN_NODE"}` once.
+
+## 1.7 Rule bytecode (targeting/branching)
+
+Compiled server-side by `packages/rulec` from a rule-tree JSON; interpreted by the agent. Stack machine, big-endian, versioned header `[0x43 0x42 ver(1)]`.
+
+Opcodes (1 byte + operands):
+
+| Op | Hex | Operands | Semantics |
+|---|---|---|---|
+| PUSH_STR | 01 | u16 idx into string pool | push |
+| PUSH_NUM | 02 | f64 | push |
+| PUSH_BOOL | 03 | u8 | push |
+| LOAD_ATTR | 10 | u16 str idx (attr name) | push ctx.user[attr] ?? null |
+| LOAD_ENV | 11 | u16 (`url`,`route`,`locale`,`session_n`,`ts`) | push |
+| ELEM_EXISTS | 12 | u16 str idx (anchor id) | resolve via anchoring engine (cached 500ms), push bool |
+| EQ/NE/GT/GTE/LT/LTE | 20–25 | — | binary compare (null-safe: any op on null ⇒ false) |
+| IN | 26 | u8 n | value in next n stack entries |
+| MATCH | 27 | u16 str idx | glob match (`*`,`?` only — **no regex**) on string |
+| AND/OR/NOT | 30–32 | — | boolean |
+| HALT | FF | — | top of stack (must be bool) is result |
+
+Interpreter limits: max 512 ops, max stack 32, max 4 `ELEM_EXISTS` per program, 1ms deadline (checked every 64 ops) — exceeding any ⇒ result `false` + one `agent_error{code:"BC_LIMIT"}`. Malformed program ⇒ `false`. The compiler and interpreter share a golden test-vector file (`rulec/vectors.json`, ≥200 cases including adversarial: truncated programs, bad indices, deep nesting).
+
+## 1.8 Analytics event (`event.schema.json`)
+
+```jsonc
+{
+  "v": 1, "tenant": "…", "env": "prod",
+  "u": "<anon_user_hash 32hex>", "s": "<session ulid>",
+  "e": "step_view",              // enum §7.4 HLD, plus low_confidence_anchor, anchor_fail, agent_error
+  "g": "gd_x7k2", "gv": 14, "st": "s1",
+  "loc": "en", "ts": 1752566400123,
+  "m": { }                        // type-specific: survey answers (scrubbed), error codes, confidence score
+}
+```
+
+Batch envelope: `{v:1, sent_at, events:[…]}`, ≤20 events or ≤32KB.
+
+**AC Part 1:** schemas committed with generated TS types; `rulec` compiles the golden rule set and the agent interpreter passes all vectors; JCS canonicalization round-trips signed sample bundles.
+
+---
+
+# PART 2 — The Agent (`packages/agent`)
+
+## 2.1 Loader (`loader/loader.ts`, budget ≤ 2KB minified)
+
+Host snippet (documented, host teams own it):
+
+```html
+<script async defer src="https://compass.bank.internal/a/compass-agent-1.js"
+  integrity="sha384-…" crossorigin="anonymous"
+  data-tenant="straightbank-web" data-env="prod"
+  data-ctx-endpoint="/api/compass-context"></script>
+```
+
+The agent file itself begins with the guard:
+
+```ts
+(() => { try { bootstrap(readConfigFromCurrentScript()); } catch (e) { /* absolute silence */ } })();
+```
+
+`readConfigFromCurrentScript()` reads `document.currentScript.dataset`; missing tenant/env ⇒ no-op.
+
+## 2.2 Kernel (`kernel/`)
+
+### 2.2.1 Boot sequence (`kernel/boot.ts`)
+
+```
+bootstrap(cfg):
+  if window.__compass__ exists → return (idempotent)
+  window.__compass__ = { v: AGENT_VERSION }
+  wait: DOMContentLoaded, then requestIdleCallback (fallback setTimeout 200ms)
+  ctx  = fetchContext(cfg)                     // 2.2.4; failure ⇒ anonymous ctx (targeting on user attrs = false)
+  man  = fetchJSON(manifestURL, {timeout: 800})// failure ⇒ silent stop
+  if man.kill or semver(AGENT_VERSION) < man.agent_min → stop
+  locale = resolveLocale(ctx, man.locales)     // 2.8
+  bun  = fetchJSON(bundleURL(man.bundles[locale]), {timeout: 800, cacheForever: true})
+  if !verifySignature(bun, man.sig_key_id) → beacon(BUNDLE_SIG_FAIL); stop
+  store.init(cfg.tenant, cfg.env)
+  bus  = new EventBus()
+  modules = [Targeting, Anchoring, Positioning, Backdrop, Widgets, Engine, Beacon].map(m => guard(m.init(bun, ctx, bus)))
+  RouteWatcher.start(bus)                      // 2.2.3
+  bus.emit('page:eval')                        // first targeting pass
+  setInterval(refreshManifest, 60_000)         // kill-switch + new-publish detection
+```
+
+`refreshManifest`: if bundle hash changed → soft-reload content (tear down idle widgets, keep in-flight flow until it ends, then swap).
+
+### 2.2.2 Error boundary (`kernel/guard.ts`)
+
+Every module public entry and every event-bus handler is wrapped:
+
+```ts
+function guard<T extends Function>(fn: T, moduleId: string): T {
+  return ((...a) => {
+    if (disabled.has(moduleId)) return;
+    try { return fn(...a); }
+    catch (e) {
+      errCount[moduleId] = (errCount[moduleId] ?? 0) + 1;
+      Beacon.error(moduleId, e);                    // rate-limited: max 5/module/session
+      if (errCount[moduleId] >= 3) { disabled.add(moduleId); teardown(moduleId); }
+    }
+  }) as T;
+}
+```
+
+`teardown(moduleId)` must leave zero DOM residue (each module registers a synchronous `dispose()`; Backdrop's dispose removes panels in the same frame — HLD §5.3.1 guardrail 2).
+
+### 2.2.3 SPA route detection (`kernel/routes.ts`)
+
+Wrap `history.pushState`/`replaceState` (preserve originals, call-through, then `bus.emit('route:change')`); listen `popstate`, `hashchange`. Additionally a body-level `MutationObserver` with 250ms debounce and a 10/sec ceiling emits `dom:settled` (used by anchoring re-resolution). Observers use `{subtree:true, childList:true}` only — no attribute observation at body level (cost).
+
+### 2.2.4 Context token (`kernel/context.ts`)
+
+`fetchContext`: `GET cfg.ctxEndpoint` (same-origin, host app implements it by calling the Identity Adapter server-side; reference impls in `docs/host-integration/`). Response = compact JWS `{u, role, dept, country, locale, tenure_band, iat, exp≤900s, aud:"compass:"+tenant}`. The agent does **not** verify the JWS (it lacks the key and must not embed shared secrets); it parses claims for client-side targeting and forwards the raw token on Collector calls where the Collector verifies it. Absent/expired token ⇒ anonymous context.
+
+## 2.3 Anchoring engine (`anchoring/resolver.ts`)
+
+### 2.3.1 Resolution algorithm
+
+```
+resolve(fp: Fingerprint, root: Document|ShadowRoot): {el, confidence} | null
+  root = descendFrames(fp.frame_path)          // same-origin only; cross-origin ⇒ null
+  candidates = []
+  if fp.signals.data_guide: candidates += root.querySelectorAll(`[data-guide="${cssEscape(v)}"]`)
+  if fp.signals.attr_id:    candidates += byId
+  if candidates.empty:      candidates = root.querySelectorAll(fp.signals.tag) capped at 500
+  for el of candidates: score(el, fp)          // weighted sum, weights per 1.5, normalized to [0,1]
+  best, second = top2
+  if best ≥ 0.85 and (best - second) ≥ 0.10 → return {el, best}
+  if best ≥ 0.60 → beacon(low_confidence_anchor, {a: fp.id, c: best}); return {el, best}
+  beacon(anchor_fail, {a: fp.id}); return null
+```
+
+Scoring details: `classes` compares only the stable subset captured (Jaccard); `text` uses normalized comparison with 0.5 partial credit for prefix match ≥ 8 chars; `path` scores per-segment from the leaf up, weighted decay 0.6^depth; `geometry` contributes only as tie-breaker (added after threshold check as +0.01·match). `data_guide` exact match short-circuits to confidence 1.0.
+
+Caching: results memoized per anchor id, invalidated on `dom:settled` and `route:change`. `ELEM_EXISTS` bytecode op uses this resolver with the 500ms cache.
+
+### 2.3.2 Visibility gate
+
+An anchor "counts" only if `el.getClientRects().length > 0`, not `visibility:hidden`, and its center is inside its scroll-container's clip or reachable by scroll. Helper `isActionable(el)` additionally requires no covering element at the center point (`elementFromPoint` inside the anchor's root).
+
+## 2.4 Positioning engine (`positioning/`)
+
+Contract (pure function + subscription wrapper):
+
+```ts
+computePosition(anchorRect, tipSize, placement: LogicalPlacement, boundaries: Rect[]): {x, y, resolvedPlacement, arrow}
+```
+
+- Logical placements resolved against `getComputedStyle(document.documentElement).direction` (and per-frame direction for iframe anchors).
+- Boundary set = viewport ∩ each scroll container's client rect along the ancestor chain (`collectClipChain(el)` walks ancestors; `overflow` ∈ {auto, scroll, hidden, clip} or `contain: paint` counts; CSS `transform`/`perspective`/`filter` ancestors reset the containing block — track and offset).
+- Fallback order on collision: flip (opposite side) → shift (slide along cross-axis, clamp with 8px margin) → resize (cap tooltip max-height, enable internal scroll).
+- Live updates: one shared `requestAnimationFrame` scheduler; inputs = passive scroll listeners on the clip chain, `ResizeObserver` on anchor + tooltip, `IntersectionObserver` (threshold 0) on anchor to hide the widget when the anchor leaves its clip.
+- Unit-test matrix (pure function): 12 placements × {fits, collides-flip, collides-shift, collides-both, RTL} — table-driven in `positioning/compute.spec.ts`.
+
+## 2.5 Backdrop (`backdrop/`) — implements HLD §5.3.1
+
+Four fixed-position panels + focus manager inside the agent shadow root. `show(anchorEl, mode)` computes panel rects from `anchorRect` inflated by 4px; panels use `pointer-events: none` (dim) / `auto` (block). Update path shares the positioning rAF scheduler. `block` mode: focus trap cycles tooltip controls + anchor (`keydown` capture on shadow root); `Esc` ⇒ `bus.emit('flow:exit')`. Inactivity timer default 300s ⇒ auto-dismiss + `flow_abandon{reason:"idle"}`. Blur: `if CSS.supports('backdrop-filter','blur(2px)') && !prefersReducedMotion && theme.blur_enabled` add class; otherwise dim only. `dispose()` synchronous panel removal.
+
+## 2.6 Walk-thru FSM (`engine/fsm.ts`)
+
+```ts
+interface FlowState { flowId; version; stepId; vars: Record<string, string|number|boolean>; startedAt }
+```
+
+- Persistence: `sessionStorage["cmp:<tenant>:<env>:flow"]` (JSON, ≤4KB), written on every transition; on boot, if present and guide version matches, resume at stored step (re-resolve anchor; on fail → `@fallback`).
+- Transition sources: delegated listeners installed per-step (click on anchor uses capture-phase listener on the anchor's root, matched by `el.contains(target)`); `element_gone`/`element_visible` via anchoring cache invalidation events; `wait.timeout_ms` via `setTimeout` cleared on teardown.
+- Determinism: transitions evaluated in authored order; first match wins; branching `if_bc` evaluated through the bytecode interpreter with the flow's `vars` merged into context.
+- Every step entry: `step_view`; completion: `step_complete`; `@skip`: `step_skipped`; `flow:exit`: `flow_abandon`.
+- Hard cap: 50 steps/flow, 200 transitions/session per flow (loop guard) — exceeding ⇒ end flow + `agent_error{code:"FSM_LOOP"}`.
+
+## 2.7 Widgets (`widgets/`)
+
+All render into `AgentRoot`: `document.body.appendChild(host)` where `host` carries `attachShadow({mode:'closed'})`; one adopted constructable stylesheet built from `theme` tokens (CSS custom properties `--cmp-*`); base `z-index: theme.z_base`. Inline placement (launcher/announcement only) per HLD §5.7: placeholder `<div data-cmp-inline="gd_id">` with its own closed shadow root; `MutationObserver` on the container re-injects (debounce 200ms, max 5/route), then downgrade (launcher→overlay, announcement→skip).
+
+Per-widget notes: **Tips** — trigger `mouseenter/focusin` (150ms intent delay) or `always`; validation tips subscribe to `input`/`change` on the anchor. **Launchers** — sized per envelope; icon = media asset. **Announcements** — modal (focus-trapped) or slide-in; scheduling/frequency enforced by targeting layer. **Surveys** — question types: nps(0-10), scale(1-5), single, multi, text (text answers pass client-side PII pattern filter — same regex set as Collector, shared from `schemas/pii.ts`; on match, replace with `"[redacted]"`). **Assist panel** — lists published `assist_item`s + flows, client-side substring search over titles/keywords. **Deep links** — on boot, if `location.search` contains `compass_flow=<id>` and guide targeting passes → start flow, then strip param via `replaceState`.
+
+## 2.8 i18n (`i18n/`)
+
+`resolveLocale(ctx, available)`: exact ctx.locale → language-only prefix → host `<html lang>` → `navigator.language` → tenant default (first in `available`). Direction from a compiled `RTL_LANGS = ["ar","he","fa","ur"]` set; sets `dir` attribute on the agent shadow host. All content arrives pre-localized per bundle (one bundle per locale) — the agent never merges locales.
+
+## 2.9 Beacon (`beacon/`)
+
+Queue in memory + overflow ring in `localStorage["cmp:<t>:<e>:q"]` (cap 200 events / 64KB, oldest dropped). Flush: 10s timer, 20-event high-water, `visibilitychange→hidden` via `navigator.sendBeacon(collectorURL, blob)`; otherwise `fetch(…, {keepalive:true})`. Retry: exponential backoff 5s→80s, max 4, then park in ring for next session. Include context token header `X-Compass-Ctx` when present.
+
+## 2.10 Storage keys (single registry `storage/keys.ts`)
+
+`cmp:<tenant>:<env>:flow` (session), `:q` (local, beacon ring), `:seen` (local, `{guideId: {v, ts, count, snooze_until}}`, cap 300 entries LRU), `:sess` (session ulid).
+
+**AC Part 2:** agent bundle ≤ 30KB gzip (loader+core per HLD §5.1 budget); boots on gallery baseline pages with zero console errors; all module teardowns leave `document.body.children` count unchanged; FSM golden-path Playwright test (5-step flow with branch + cross-page resume) green; signature-tampered bundle rejected.
+
+---
+# PART 3 — Backend Services (`packages/services`)
+
+Common conventions: REST + JSON; all errors `{code, message, trace_id}`; OIDC bearer auth against bank IdP for console/API users, mTLS service-to-service; every mutating endpoint writes an `audit_event` row in the same transaction; OpenAPI specs generated and committed under each service's `openapi.yaml`.
+
+**Java implementation conventions (normative):** Java 21 (virtual threads enabled for the Collector's I/O paths), Spring Boot 3.3+; Spring Web MVC; Spring Security OAuth2 resource-server for OIDC; persistence via **jOOQ** over the existing SQL DDL (schema-first — no JPA entity drift; the DDL in §3.1 remains the single source of truth, applied via **Flyway** using the same migration files under `infra/pg/`); Jackson with fail-on-unknown-properties **off** for inbound events, **on** for internal formats; JSON Schema validation via `networknt/json-schema-validator`; JCS canonicalization (RFC 8785) via an in-repo `compass-jcs` module with cross-language golden tests against the TS implementation; Ed25519 via JDK `java.security` (SunEC) with KMS-held keys; ClickHouse via the official `clickhouse-java` client with `async_insert` settings as specified in §3.5; Micrometer → Prometheus; MapStruct forbidden for wire types (generated types used directly). All server dependencies flow through the bank artifact proxy with SCA scanning — same governance as before, different ecosystem (Maven Central proxied).
+
+## 3.1 PostgreSQL schema (migrations in `infra/pg/`)
+
+```sql
+CREATE TABLE tenant (
+  id text PRIMARY KEY,                -- "straightbank-web"
+  name text NOT NULL,
+  allowed_origins text[] NOT NULL,
+  theme jsonb NOT NULL DEFAULT '{}',
+  inline_mode_enabled bool NOT NULL DEFAULT false,   -- HLD §5.7 gate
+  hmac_key_ref text NOT NULL,         -- reference into bank KMS, never the key
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE environment (
+  id serial PRIMARY KEY, tenant_id text REFERENCES tenant, name text CHECK (name IN ('dev','uat','prod')),
+  UNIQUE (tenant_id, name)
+);
+
+CREATE TABLE guide (
+  id text PRIMARY KEY,                -- gd_<ulid>
+  tenant_id text NOT NULL REFERENCES tenant,
+  type text NOT NULL CHECK (type IN ('flow','tip','launcher','announcement','survey','deeplink','assist_item')),
+  name text NOT NULL, created_by text NOT NULL, created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE guide_version (
+  id bigserial PRIMARY KEY, guide_id text REFERENCES guide, version int NOT NULL,
+  definition jsonb NOT NULL,          -- validated against guide.schema.json on write
+  status text NOT NULL CHECK (status IN ('draft','in_review','approved','published','retired')),
+  submitted_by text, approved_by text, approved_at timestamptz,
+  UNIQUE (guide_id, version),
+  CONSTRAINT maker_checker CHECK (approved_by IS NULL OR approved_by <> submitted_by)
+);
+
+CREATE TABLE anchor (
+  id text PRIMARY KEY, tenant_id text REFERENCES tenant,
+  fingerprint jsonb NOT NULL, captured_url text, captured_at timestamptz,
+  health text NOT NULL DEFAULT 'ok' CHECK (health IN ('ok','degraded','failing'))  -- fed by analytics job
+);
+
+CREATE TABLE segment (
+  id text PRIMARY KEY, tenant_id text REFERENCES tenant, name text,
+  rule_tree jsonb NOT NULL, bytecode bytea NOT NULL, sensitive bool DEFAULT false
+);
+
+CREATE TABLE translation (
+  guide_version_id bigint REFERENCES guide_version, locale text, strings jsonb NOT NULL,
+  status text CHECK (status IN ('machine','in_review','approved')), reviewed_by text,
+  PRIMARY KEY (guide_version_id, locale)
+);
+
+CREATE TABLE media_asset (
+  id text PRIMARY KEY,                -- img_<sha256>
+  tenant_id text REFERENCES tenant, mime text, bytes int, width int, height int,
+  locale_variant_of text REFERENCES media_asset,  -- HLD §7.3 per-locale variants
+  locale text, alt_default text NOT NULL,
+  scanned bool NOT NULL DEFAULT false, uploaded_by text, uploaded_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE publish_record (
+  id bigserial PRIMARY KEY, tenant_id text, environment text, locale text,
+  bundle_hash text NOT NULL, manifest_version bigint NOT NULL,
+  published_by text NOT NULL, published_at timestamptz DEFAULT now(),
+  rollback_of bigint REFERENCES publish_record
+);
+
+CREATE TABLE audit_event (
+  id bigserial PRIMARY KEY, actor text NOT NULL, action text NOT NULL,
+  entity_type text, entity_id text, diff jsonb, ts timestamptz DEFAULT now()
+);
+-- audit_event: INSERT-only (REVOKE UPDATE, DELETE); nightly WORM export to SIEM.
+```
+
+## 3.2 Content Service
+
+Endpoints (prefix `/api/content`, RBAC in brackets):
+
+| Method/Path | Role | Behavior |
+|---|---|---|
+| `POST /guides` | author | create guide + version 1 draft; JSON-Schema validate; link-href allow-list check; anchors must exist |
+| `PUT /guides/{id}/versions/{v}` | author | update draft only (409 otherwise) |
+| `POST /guides/{id}/versions/{v}/submit` | author | draft→in_review |
+| `POST /…/approve` \| `/reject` | reviewer | enforces maker≠checker (DB constraint is backstop); reject requires comment |
+| `POST /publish` | releaser | body `{tenant, env, locale[]}`; runs the publish pipeline (3.2.1); step-up MFA claim (`acr`) required |
+| `POST /rollback` | releaser | repoint manifest to `publish_record.rollback_of` target |
+| `POST /media` | author | multipart upload → pipeline: mime sniff (magic bytes, not extension) → size/dimension caps → AV scan (bank ICAP endpoint) → SVG sanitize (server-side DOM parse; strip `script`, on* attrs, `foreignObject`, external hrefs; re-serialize) → store to object store as `img_<sha256>` |
+| `GET /anchors?health=degraded` | author | heal queue |
+| `POST /anchors/{id}/rebaseline` | author→reviewer flow | new fingerprint captured in Studio, versioned like content |
+
+### 3.2.1 Publish pipeline (in-process job, idempotent)
+
+```
+for each locale:
+  1. collect approved guide_versions for tenant+env; join approved translations (missing locale key ⇒ fallback chain; hard-fail publish if a *required* locale misses >0 strings — configurable)
+  2. compile segments (rulec) — reuse stored bytecode, recompile if rule_tree hash changed
+  3. assemble bundle JSON (schema 1.2); JCS-canonicalize
+  4. sign: send digest to bank KMS/HSM (Ed25519 key compass-<year>-<n>); attach detached sig
+  5. write bundle-<sha256>.json to object store (immutable, PUT-if-absent)
+  6. INSERT publish_record; atomically write new manifest.json (schema 1.1) via object-store versioned PUT
+```
+
+Rollback = steps 6 only, pointing at prior hash. Publish and rollback both emit ops events (webhook to bank ChatOps).
+
+## 3.3 Delivery Service
+
+Thin, read-only: `GET /d/{tenant}/{env}/manifest.json` (Cache-Control: max-age=60), `GET /d/{tenant}/…/bundle-<hash>.json` and `/assets/img_<sha256>` (Cache-Control: max-age=31536000, immutable) — all streamed from object store with ETag = hash. CORS: `Access-Control-Allow-Origin` reflected only for the tenant's `allowed_origins`. No auth (content is signed and non-sensitive by policy — no PII in bundles; enforced by publish-time linter that greps assembled bundles against PII regex set).
+
+## 3.4 Identity Adapter
+
+`POST /api/idp/context` — called server-side by host apps (mTLS + client credential). Input: host-verified enterprise user id + tenant. Output: JWS (ES256, adapter key) claims `{u: HMAC_SHA256(kms_key(tenant), enterprise_uid) hex, role, dept, country, locale, tenure_band, aud, exp: now+900}`. Per-tenant HMAC keys live in bank KMS (`tenant.hmac_key_ref`); the adapter requests HMAC operations from KMS — raw keys never in process memory. Collector verifies the JWS with the adapter's public key.
+
+## 3.5 Collector (ingestion + spool + ClickHouse writer) — HLD §7.4
+
+```
+POST /c/e   (body: batch envelope 1.8; header X-Compass-Ctx optional)
+  1. size gate ≤64KB; JSON parse; schema-validate each event (invalid ⇒ drop event, count metric)
+  2. verify ctx token if present; else events accepted with u="anon" only
+  3. PII scrub on m.* free-text fields (shared regex set: PAN via Luhn-gated 13-19 digit runs,
+     IBAN pattern, national-ID formats per country config, emails, E.164 phones) ⇒ "[redacted]"
+  4. append NDJSON to active spool segment
+  5. 202 always (client must not retry on 4xx-free path)
+```
+
+Spool implementation (`services/collector/spool.ts`):
+- Per-pod PersistentVolume at `/spool`; segment files `seg-<ulid>.ndjson`, rotate at 64MB or 60s.
+- `fsync` on rotation and every 5s (group commit); crash recovery replays segments lacking a `.done` marker.
+- Writer goroutine/worker: reads sealed segments → ClickHouse `INSERT ... FORMAT JSONEachRow` with `async_insert=1, wait_for_async_insert=0`, batch ≤ 50k rows; on success renames to `.done` (deleted after 24h); on CH failure: backoff 1s→60s, segments accumulate.
+- Capacity guard: if `/spool` >80% → drop-oldest `.pending` segments (analytics is non-critical-path), raise alert.
+- Metrics: `spool_lag_seconds`, `spool_bytes`, `insert_failures_total` → Prometheus.
+
+## 3.6 ClickHouse schema (`infra/ch/`)
+
+```sql
+CREATE TABLE events (
+  tenant LowCardinality(String), env LowCardinality(String),
+  u FixedString(32), s String, e LowCardinality(String),
+  g String, gv UInt32, st String, loc LowCardinality(String),
+  ts DateTime64(3), m String  -- raw JSON
+) ENGINE = ReplicatedMergeTree
+PARTITION BY toYYYYMM(ts)
+ORDER BY (tenant, env, e, ts)
+TTL toDateTime(ts) + INTERVAL 13 MONTH;
+
+CREATE MATERIALIZED VIEW mv_funnel ENGINE = ReplicatedSummingMergeTree
+ORDER BY (tenant, env, g, gv, st, toDate(ts)) AS
+SELECT tenant, env, g, gv, st, toDate(ts) d,
+  countIf(e='step_view') views, countIf(e='step_complete') completes,
+  countIf(e='step_skipped') skips
+FROM events GROUP BY tenant, env, g, gv, st, d;
+```
+
+Alert queries (Grafana, 2-min interval): anchor health — `anchor_fail + low_confidence_anchor` rate per (tenant, anchor) over 1h vs 7-day baseline > 3× ⇒ warn, >10× ⇒ page + auto-set `anchor.health='degraded'` via a small reconciler job.
+
+## 3.7 Admin Service
+
+Tenants CRUD, environment provisioning, RBAC group mapping (`dap-authors@…` AD groups → roles per tenant), API-key issue for host mTLS enrollment, kill switch (`POST /api/admin/kill {tenant, env, on}` → rewrites manifest `kill` flag; step-up MFA; audit), audit query API with mandatory filters.
+
+**AC Part 3:** end-to-end: create→submit→approve→publish flows produce a signed bundle the Part-2 agent loads and verifies; rollback observable in ≤60s at the agent; Collector survives ClickHouse 30-min outage with zero event loss under 500 eps synthetic load; maker=checker rejected at both API and DB layers; SVG with embedded script uploaded ⇒ stored sanitized.
+
+---
+
+# PART 4 — Authoring Studio
+
+## 4.1 Extension (`packages/studio-extension`, Manifest V3)
+
+Components: background service-worker (SSO token broker via `chrome.identity`/bank IdP; talks to Content Service), content script (injected only on tenant `allowed_origins` — list synced from Admin API), side-panel UI (React allowed — internal tool).
+
+Element picker (`picker.ts`): on hover, compute candidate fingerprint live and render an overlay chip with **anchor strength** = simulated resolver confidence against the current DOM (reuses the agent's `anchoring` package — shared code, single source of truth). Warnings surfaced: "no id/data-guide (strength ≤0.7) — request a data-guide attribute", "text-only anchor will break in other locales". Click ⇒ POST fingerprint to Content Service, receive `anch_id`.
+
+Capture rules (mirror 1.5): stable-class filter regexes `/^css-[a-z0-9]{5,}$/`, `/^sc-/`, `/^_ngcontent/`, `/^jsx-\d+/`, hash-like `/^[a-z]+-[A-Za-z0-9]{8,}$/` — maintained in `schemas/volatile-classes.json` (shared with resolver tests).
+
+WYSIWYG: renders the actual agent widget in **preview mode** (agent loaded in `preview:true`, which disables beacons and frequency state) so what authors see is literally the production renderer. LTR/RTL toggle re-renders with forced direction. Record mode (manual v1): captures click targets into a draft step list (AI drafting arrives in v2 — leave the hook: recorded sessions POST to `/api/content/recordings` as inert JSON).
+
+## 4.2 Console (`packages/studio-console`)
+
+React SPA served from platform origin; OIDC PKCE. Screens: Guide list/detail (definition editor is form-based over the schema — no raw JSON editing for authors; "advanced JSON" view read-only), Flow map (graph view of steps/transitions; client-side cycle detection warning), Review queue (rendered preview + JSON diff via `jsondiffpatch`-style custom differ — server-computed), Translations (grid per locale, XLIFF 2.0 export/import endpoint `/api/content/xliff`), Segments builder (rule tree UI → preview compiled ops count), Media library (upload, variants per locale, usage references), Publish screen (per env+locale checklist: untranslated strings, degraded anchors used, inline-mode items needing tenant flag), Insights (embedded Superset per-tenant dashboards via guest token), Admin (RBAC, kill switch — MFA-gated).
+
+**AC Part 4:** author with no console training creates a 3-step flow on the gallery's demo app in <15 min (usability test script in `gallery/uat/authoring.md`); picker strength matches runtime resolver confidence within ±0.05 on the gallery matrix; XLIFF round-trip lossless.
+
+---
+
+# PART 5 — Observability & Ops
+
+- **Agent telemetry:** `agent_error` events carry `{code, module, msg (truncated 200, scrubbed), agent_v, bundle_hash}`; Grafana dashboard "Agent Health" per tenant: error rate/sessions, sig failures, stale-agent count, boot p95 (performance.mark deltas shipped in a 1%-sampled `agent_boot` event).
+- **Service golden signals:** RED metrics per endpoint; SLOs: manifest p99 <50ms (edge), bundle p99 <150ms, collector availability 99.9%, publish→visible ≤90s.
+- **Runbooks (`docs/runbooks/`):** kill-switch activation, rollback, spool saturation, CH outage, signing-key rotation (dual control: new key added to agent key map in release N, publishes switch at N+1, old key retired N+2).
+- **Backups:** PG PITR (bank standard), object store versioning + cross-DC replication, CH replicated tables; content is additionally re-derivable from PG (bundles are compilations).
+
+# PART 6 — Test Harness (`packages/gallery`) — release gate
+
+Structure: `gallery/pages/<case>/index.html` + `case.json` (declares which agent behaviors are asserted). Mandatory cases (initial 24): nested-scrollers, sticky-header, transformed-ancestor, zoom-125/150/200, iframe-same-origin, frameset-legacy, shadow-host, react-rerender-storm (100ms interval re-render), angular-clone, jquery-mutation, rtl-arabic, forced-colors, reduced-motion, slow-cpu-4x, spa-router, multipage-resume, inline-injection-react (HLD §5.7 g1), backdrop-orphan (route change mid-block-step ⇒ zero residue, HLD §5.3.1 g2), csp-strict (page with `default-src 'self'`; agent must function with documented delta only), sig-tamper, delivery-down, collector-down, bundle-oversize, loop-flow.
+
+Playwright suites assert: functional (anchor found, FSM path), visual (`toHaveScreenshot` per placement), a11y (axe scan of open widgets = 0 serious/critical), performance (CDP trace: boot main-thread ≤50ms, CLS contribution = 0 for overlay mode), chaos (network route abort for delivery/collector). CI: full gallery on every merge to main; PR runs affected subset + smoke. **A release artifact is produced only from a green full-gallery run**, and every production incident adds a permanent case (`case.json.origin = "INC-…"`) before the fix PR merges.
+
+# PART 7 — Build order & milestones (for the implementing engineer/model)
+
+| Milestone | Contents | Exit test |
+|---|---|---|
+| M1 (wk 1–3) | Part 1 schemas + rulec + verify lib; Delivery service; static hand-written bundle | Agent-less: curl manifest/bundle, sig verify CLI green |
+| M2 (wk 3–7) | Agent kernel, anchoring, positioning, Tips + Flows, beacon stub | Gallery baseline 12 cases green |
+| M3 (wk 7–10) | Backdrop, FSM full, remaining widgets, i18n/RTL, inline mode | Full 24-case gallery green |
+| M4 (wk 8–12, parallel) | Content/Identity/Admin services, publish pipeline, Collector+spool+CH | Part-3 AC green |
+| M5 (wk 12–16) | Studio extension + console, XLIFF, Insights embed | Part-4 AC green; pilot tenant authoring UAT |
+| M6 (wk 16–18) | Hardening: pen-test fixes, perf, runbooks, DR drill | Go-live gate checklist |
+
+# PART 8 — Coding standards & definition of done
+
+TS strict + `noUncheckedIndexedAccess`; agent package ESLint rule set forbids: `innerHTML`, `insertAdjacentHTML`, `eval`, `new Function`, `document.write`, any `import` from `node_modules` (custom rule `no-external-imports`); every DOM write in the agent must be inside a module with a registered `dispose()`. DoD per PR: unit tests for new logic, gallery case updated/added if behavior is user-visible, schema change ⇒ version bump + migration note, LLD section reference in PR description, no TODOs without linked issue.
+
+---
+
+# PART 9 — UI Reference Mockups (design source of truth for Part 4)
+
+Two interactive HTML mockups accompany this LLD as the wireframe-fidelity reference for the Studio build. They are self-contained files (open directly in a browser; shared tokens in `_tokens.css`) and are **normative for layout, information hierarchy, and status vocabulary** — visual polish (final typography, brand palette) is resolved during Part 4 implementation against the bank's design system.
+
+| File | Covers |
+|---|---|
+| `mockups/mockup-studio-console.html` | Studio web console (LLD §4.2) — all 8 sections, interactive sidebar |
+| `mockups/mockup-studio-extension.html` | Studio browser extension (LLD §4.1) — element picker + docked step editor |
+| `mockups/_tokens.css` | Shared design tokens for both mockups |
+
+## 9.1 Console mockup — normative behaviors per screen
+
+- **Shell:** top bar carries tenant selector + environment selector (both dropdowns, per-user RBAC-filtered) and the signed-in author avatar; left sidebar lists exactly: Guides, Review queue, Translations, Segments, Media, Publish, Insights, Admin.
+- **Guides (landing):** four metric cards — Published, In review, **Degraded anchors** (click-through to the heal queue), 7-day completion. Table columns: Name, Type·version, workflow Status badge, Locales, Anchor health badge. Status badge colors: published=green tint, in-review=amber tint, draft=gray tint, degraded=red tint (map to the role tints of the bank design system in implementation).
+- **Review queue:** two card archetypes shown and both required: (a) content review — human-readable JSON diff (server-computed, red/green line style as mocked) with Approve / Reject-with-comment (comment mandatory on reject) / Preview-rendered actions; (b) **anchor heal proposal** — auto-flagged card showing old→new confidence (e.g., 0.62 → 0.97), plain-language cause, one-click accept routed through the same approval action.
+- **Publish:** pre-flight checklist rendered exactly in this order — approved-items summary, per-locale translation completeness, degraded-anchor warnings for referenced anchors, inline-mode items vs tenant flag, PII bundle-lint result. Primary button "Publish to prod" is the screen's only filled button; the MFA/Ed25519/rollback caption sits beside it. Publish history link below the card.
+- **Insights:** three metric cards (starts, completion, median duration) + horizontal step-funnel bars with per-step percentages and an automated callout line (largest drop, notable cohort delta). Full dashboards remain embedded Superset; this screen is the per-guide summary.
+- **Translations:** grid Key | source locale | target locale (RTL cells rendered `dir="rtl"`) | per-string status badge (`machine`/`in review`/`approved`); actions Export XLIFF, Import XLIFF, Preview RTL.
+- **Segments:** rule summary card shows human-readable rule tree plus compiled bytecode op count and client-side/server-side evaluation badge.
+- **Admin:** kill switch card (danger-styled action, 60-second propagation caption, MFA note) and per-tenant role→AD-group mapping with member counts.
+
+## 9.2 Extension mockup — normative behaviors
+
+- **Picker state chrome:** a visible "Compass · picker on" pill in the page context so authors always know capture mode is active; pickable elements get a dashed hover outline (accent) and a solid outline in the captured anchor's health color once selected.
+- **Anchor strength chip:** on capture, show element name, generated anchor id, and strength score (two decimals). Strength thresholds and colors are normative and must match the runtime resolver (LLD §2.3.1): ≥0.85 green (strong), 0.60–0.84 amber (works, improvable), <0.60 red with the exact warning that the step **would be skipped at runtime** and the remediation ("add data-guide").
+- **Fingerprint signal list:** the detail card lists the captured signals in ranked order (data-guide/id first) in monospace; `data-guide` capture is labeled as a short-circuit match.
+- **Contextual warnings (must-implement set):** no id/data-guide present → "request data-guide from app team"; text-signal-dependent anchor on a multi-locale guide → "variant capture advised for <locale>"; below-threshold → skip warning as above.
+- **Step editor panel:** docked right, 236px reference width; step rows show anchor-health-colored anchor icon + step label + strength; selecting a row highlights the corresponding element on the page (bidirectional selection). Footer actions fixed: **Preview** (loads the production agent in `preview:true` — renderer parity is a hard requirement), **RTL** (forced-direction re-render), **Submit** (to review; author role can never publish).
+- **Parity rule (AC):** the strength score displayed by the picker must match the runtime resolver's confidence within ±0.05 across the gallery matrix (restates Part 4 AC — the mockup makes the surfaced number normative UI).
+
+## 9.3 Out-of-mockup screens
+
+Flow map (graph editor), Media upload dialog, and the recording-mode capture bar are specified textually in §4.1–4.2 and follow the same token set; mock them during Part 4 sprint 1 using `_tokens.css` before implementation.
+
+---
+
+# PART 10 — Backend Re-platform: Node/NestJS → Java/Spring Boot (decoupling & migration plan)
+
+**Context.** A full application has already been generated against LLD v1.x with the six backend services implemented in Node/NestJS. This part defines how to move the backend to Java **without discarding that work, without changing any external contract, and without touching the agent, Studio, schemas, bundles, bytecode, or databases.** The generated Node services become the *reference implementation and executable specification* for the Java build.
+
+## 10.1 What is kept, what moves, what is retired
+
+| Asset (already generated) | Disposition |
+|---|---|
+| `packages/agent`, `studio-extension`, `studio-console`, `gallery` | **Keep unchanged** — TypeScript by design (AD-01/AD-10) |
+| `packages/schemas` (JSON Schemas + generated TS types) | **Keep** — JSON Schema stays the single source of truth; add a Java codegen target (10.3-S2) |
+| `packages/rulec` (rule compiler) | **Keep as-is** (10.4 decision) — runs as a build/publish-time tool, not a runtime service |
+| SQL migrations (`infra/pg/`, `infra/ch/`) | **Keep byte-identical** — Flyway consumes the same files; databases are not migrated, only their clients |
+| Object-store layout, bundle/manifest formats, signing | **Keep** — signed artifacts are language-neutral by construction |
+| Each service's `openapi.yaml` | **Keep and freeze** — becomes the contract the Java services must satisfy (10.3-S1) |
+| Node service business logic (workflow, publish pipeline, spool, scrubbing) | **Port** to Java service-by-service (10.5); Node code retired per service after cutover |
+| NestJS-specific plumbing (modules, decorators, interceptors) | **Retired** — not ported; Spring equivalents |
+
+## 10.2 Decoupling principles
+
+1. **Contracts out of code.** Anywhere the Node implementation *is* the specification (a regex in a `.ts` file, a TS type, an in-code constant), extract it into a language-neutral artifact first, then make both stacks consume it. Never port by reading Node code alone — port from the extracted contract, use Node code for behavioral reference.
+2. **Strangler-fig, never big-bang.** The edge tier (Nginx) routes per path prefix; each service is swapped independently behind unchanged routes. Node and Java run side by side during migration.
+3. **The databases are the fixed point.** Zero schema changes during the re-platform window (enforced: `infra/pg` freeze branch). Any schema change wish is queued until 10.6 exit.
+4. **Golden tests are the acceptance mechanism.** Every extracted contract ships with test vectors executed by *both* stacks in CI. Parity is proven, not assumed.
+
+## 10.3 Decoupling steps (do these before writing any Java)
+
+**S1 — Freeze and verify the API contracts.** Regenerate `openapi.yaml` from each running Node service; commit as `contracts/openapi/<service>.yaml` v1.0.0. Record real request/response pairs from the Node services (UAT traffic or the existing e2e suite) into `contracts/pacts/` — these become provider-verification fixtures the Java services must pass.
+
+**S2 — Make schemas dual-target.** In `packages/schemas`, add a Java generation step: `jsonschema2pojo` (or `openapi-generator` for API models) emitting `com.bank.compass.schemas` into a published internal Maven artifact `compass-schemas.jar`. CI rule: TS types and Java classes are generated from the same schema commit; hand-edited generated code fails the build.
+
+**S3 — Extract embedded contracts from Node code into neutral artifacts:**
+- `schemas/pii.ts` regex set → `contracts/pii-patterns.json` (pattern, flags, replacement, Luhn-gate flag per entry) + loader in both TS (agent/surveys) and Java (Collector). Golden file: `pii-vectors.json` (input → scrubbed output, ≥100 cases).
+- Rule bytecode: the vectors file already exists (`rulec/vectors.json`) — promote it to `contracts/` and wire a Java *verifier* (not compiler) test that byte-compares stored bytecode; interpreter stays agent-side only.
+- JCS canonicalization + Ed25519 signing: create `contracts/signing-vectors.json` (canonical-form + signature pairs over sample bundles, generated once by the Node pipeline) — the Java `compass-jcs` module must reproduce byte-identical canonical forms and verify/produce identical signatures via KMS.
+- JWS context token: freeze header/claims/alg in `contracts/context-token.md` + vectors; Java Identity Adapter (Nimbus JOSE) must mint tokens the *existing agent* parses and the Java Collector verifies.
+- Spool segment format: document NDJSON segment layout, rotation, `.done` marker semantics in `contracts/spool-format.md` so a Java Collector pod can **recover segments written by a Node pod** on the same PV (required for rolling cutover).
+- Error envelope, header names (`X-Compass-Ctx`), CORS reflection rules, cache-control values → `contracts/http-conventions.md`.
+
+**S4 — Behavioral test harness against contracts.** Stand up a provider-verification CI job: spins each service (Node or Java) with Testcontainers PG/ClickHouse/MinIO, replays the pact fixtures, asserts responses. Run it against the Node services first — a green baseline proves the harness before any Java exists.
+
+## 10.4 Explicit decision: `rulec` stays TypeScript
+
+The rule compiler runs only inside the publish pipeline (seconds per publish, not on user requests). Porting it duplicates the trickiest parity surface for zero runtime benefit. Disposition: package `rulec` as a container CLI (`compass-rulec` image, stdin rule-tree → stdout bytecode + string pool); the Java Content Service invokes it as a pipeline step (K8s Job or sidecar exec) and byte-verifies output against a Java-side structural validator. If the bank later mandates single-language purity, port it then — the golden vectors make that a bounded task. This is recorded as **ADR-011**.
+
+## 10.5 Service-by-service migration order (strangler sequence)
+
+Ordered by risk (lowest first), each with its cutover test:
+
+| # | Service | Port notes | Cutover gate |
+|---|---|---|---|
+| 1 | **Delivery** | Near-stateless streaming from object store; CORS reflection per tenant | Pact green; p99 ≤ Node baseline; canary 10%→100% by route weight |
+| 2 | **Identity Adapter** | Nimbus JOSE; KMS HMAC calls | Existing UAT agents accept Java-minted tokens; Node Collector verifies them (cross-stack token test) |
+| 3 | **Admin** | CRUD + kill switch; MFA step-up claim check | Kill-switch drill executed via Java path |
+| 4 | **Collector** | Virtual threads; spool per `contracts/spool-format.md`; must adopt orphaned Node-written segments | 500 eps soak; kill ClickHouse 30 min → zero loss; mixed Node/Java pods on same PV during rollout |
+| 5 | **Targeting** | Segment CRUD; invokes rulec container | Byte-identical bytecode for the full segment corpus |
+| 6 | **Content** (largest) | Workflow, publish pipeline, media pipeline (SVG sanitizer: port to a DOM-based Java sanitizer with its own vector file — do not regex-port), XLIFF | Full authoring e2e (Studio → publish → agent renders) on Java; **byte-identical signed bundle** produced from the same DB state as Node — the ultimate parity proof |
+
+Per-service rhythm: port → pact-verify → dark-launch (mirrored traffic, diff responses) → canary → 100% → 2-week bake → delete Node service + its routes. Studio and the agent are never modified; if a Java service forces a client change, the port is wrong.
+
+## 10.6 Exit criteria & cleanup
+
+All six services on Java for 30 days with SLOs met; Node service code moved to `attic/` tag then removed; pnpm workspace reduced to browser-side packages; contract artifacts (`contracts/`) remain permanently as the cross-language boundary; schema-freeze lifted; ADR-010 (Java backend) and ADR-011 (rulec disposition) merged. Estimated effort: 6–9 engineer-weeks AI-assisted (Delivery/Identity/Admin ≈ 1 week combined; Collector ≈ 1–2; Targeting ≈ 1; Content ≈ 3–4), runnable in parallel with ongoing content operations since production traffic migrates per-service.
+
+## 10.7 Risks specific to the re-platform
+
+| Risk | Mitigation |
+|---|---|
+| Subtle behavior drift (date handling, JSON number precision, regex dialect differences between JS and Java) | Golden vectors for every extracted contract; dark-launch response diffing; `RE2/j`-style regex review for PII patterns (JS and Java regex dialects differ — each pattern re-validated against the vector file, not visually) |
+| Canonicalization mismatch breaks signatures | Byte-level JCS golden tests; publish from Java compared against Node output on identical DB snapshots (service #6 gate) |
+| Mixed-stack window operational confusion | Route table in one place (edge config, GitOps-reviewed); dashboards labeled per implementation; freeze window for schema changes |
+| Team ports NestJS idioms literally | Port from contracts + reference behavior, not code structure; Java conventions in Part 3 are normative |

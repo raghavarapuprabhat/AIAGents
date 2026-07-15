@@ -40,6 +40,7 @@ Native mobile SDKs (iOS/Android), thick-client desktop applications, session-rep
 | AD-07 | No PII in the DAP | The agent receives opaque hashed user identifiers and coarse attributes (role, segment, language); analytics events carry no customer data and mask all input values |
 | AD-08 | Maker-checker on all published content | Guidance renders inside banking screens; content changes get change-management rigor: four-eyes approval, audit trail, instant rollback |
 | AD-09 | Automated hostile-page test harness is a release gate | The custom runtime's substitute for open-source community debugging; no agent release without a green cross-matrix run |
+| AD-10 | Backend services are Java 21 / Spring Boot 3; browser-side code remains TypeScript | Aligns with the bank's standard server platform, operational tooling, and Java engineering bench. Language-neutral contracts (JSON Schema, OpenAPI, bytecode format, SQL migrations) form the boundary, so the TypeScript agent/Studio and Java services evolve independently |
 
 ## 4. Logical architecture
 
@@ -77,6 +78,8 @@ Native mobile SDKs (iOS/Android), thick-client desktop applications, session-rep
 
 ### 4.1 Component inventory
 
+All backend services are built on **Java 21 with Spring Boot 3** (Spring Web, Spring Security OAuth2 resource server, Flyway migrations, Micrometer/Prometheus metrics), packaged as containers on the bank's Kubernetes estate. Browser-delivered code (the agent) and the authoring tools (Studio extension and console) remain TypeScript per AD-01/AD-10; the two worlds meet only at language-neutral contracts — OpenAPI, JSON Schema, the signed bundle format, and the rule bytecode.
+
 | Component | Type | Responsibility |
 |---|---|---|
 | Compass Agent | Custom JS (browser) | Loads guidance bundles, anchors to DOM elements, renders all widget types, runs walk-thru state machine, evaluates targeting rules client-side, buffers analytics |
@@ -105,6 +108,25 @@ All Compass UI renders inside a single custom element (`<compass-root>`) using *
 
 A from-scratch positioning module. Contract: given an anchor element and a preferred placement, compute a collision-free position. The algorithm measures the anchor via `getBoundingClientRect`, walks the ancestor chain to identify every scroll container and clipping boundary (`overflow`, `contain`, CSS transforms that change containing blocks, iframe boundaries), attempts the preferred placement, and on collision applies flip → shift → resize in that order. It subscribes to `ResizeObserver`, `IntersectionObserver`, passive frame-throttled scroll, and orientation change to keep positions live. RTL is a first-class input: placements are expressed logically (`inline-start`/`inline-end`) and resolved against document direction, so Arabic layouts mirror automatically. This module is the most heavily tested unit in the codebase (§12).
 
+#### 5.3.1 Spotlight & backdrop behavior (walk-thru focus mode)
+
+Each Flow step declares a **backdrop level**, configurable per step in Studio:
+
+| Level | Visual | Interaction | Typical use |
+|---|---|---|---|
+| `none` | Tooltip only | Page fully interactive | Auto-advance steps where the user works freely |
+| `dim` | Semi-transparent dark backdrop over the viewport with a **cut-out spotlighting the anchor** | Page interactive | Orientation/attention steps |
+| `block` | Same as `dim` | Backdrop intercepts pointer events — only the spotlighted element and the tooltip's controls are clickable | "Click Submit to continue" steps requiring a deterministic path |
+
+**Implementation.** The spotlight uses the four-rectangle technique — four backdrop panels laid around the anchor's bounding rect — rather than CSS masks, because it renders on every legacy portal and recomputes cheaply as the anchor moves, scrolls, or resizes, driven by the same observer set as the positioning engine. Before showing a spotlight the agent scrolls the anchor into view through the nested scroll-container chain so the cut-out is never off-screen. True background **blur** (`backdrop-filter`) is available as an optional cosmetic enhancement where the browser supports it, degrading automatically to dim; **dim is the default and the guaranteed behavior** — blur is GPU-costly on large back-office screens and unreliable in legacy embedded browsers, so tenants are advised to standardize on dim.
+
+**Guardrails:**
+
+1. **Escape hatch, always.** A blocked screen must never trap a user: `Esc` and a visible "Exit walk-thru" control dismiss the flow instantly (recording `flow_abandon`); a configurable inactivity timeout auto-dismisses the backdrop. A frozen dim overlay on an operational banking screen is treated as a Sev-2 defect class.
+2. **Fail-open extends to the backdrop.** If the anchor is lost mid-step (SPA re-render, navigation), the backdrop is removed in the same frame as the step teardown — the agent never leaves an orphaned dim layer over a working screen. Orphaned-backdrop scenarios are mandatory hostile-gallery cases (§12).
+3. **Accessibility.** In `block` mode focus is trapped within the tooltip and spotlighted element per WCAG focus-management patterns; each step is announced via an ARIA live region; `prefers-reduced-motion` disables backdrop fade/transition animation; contrast of tooltip content over the dim layer is validated at authoring time.
+4. **Governance.** `block` is explicitly surfaced in the maker-checker diff — a checker consciously approves any step that restricts user interaction, which matters on transactional screens.
+
 ### 5.4 Anchoring engine (self-healing selectors)
 
 Brittle CSS selectors are the classic failure mode of guidance tools. Compass anchors elements with a **multi-signal fingerprint** captured at authoring time: id/name/data-* attributes, ARIA role and accessible name, tag plus a stable class subset (auto-filtering framework-generated hashed classes like `css-1x2y3z`), trimmed text content, label association, structural path with positional hints, and normalized geometry (relative position and size band). At runtime the engine scores candidates against the fingerprint with weighted matching. Above the confidence threshold (default 0.85) the widget anchors; a near-miss (0.6–0.85) anchors but emits a `low_confidence_anchor` analytics event so authors are alerted before the guide visibly breaks; below threshold the step is skipped or the flow branches to its authored fallback. Fingerprints are re-baselined from the Studio in one click when a host UI changes. A scoped, debounced `MutationObserver` re-resolves anchors when SPAs re-render, and the engine descends into same-origin iframes to support legacy portal frames. Host teams are additionally encouraged to adopt a `data-guide="..."` attribute convention on key elements — the cheapest single action that hardens anchoring program-wide.
@@ -126,7 +148,24 @@ Each Smart Walk-Thru compiles to a deterministic finite state machine: states ar
 | Menu / Help widget | Assist panel | Persistent help launcher listing available flows and resources, searchable |
 | Multi-language | i18n bundles | Per-language content bundles; language resolved from host locale → user profile → browser |
 
-### 5.7 Targeting and segmentation
+### 5.7 Placement modes (overlay vs inline)
+
+Every anchored widget declares a placement mode at authoring time:
+
+**`overlay` (default).** The widget renders in the agent's shadow-DOM overlay layer, positioned relative to the anchor by the rendering engine (§5.3). The host DOM is never modified. All widget types support this mode; Flows, Tips, and Surveys support *only* this mode — walk-thru highlights and tooltips are inherently floating.
+
+**`inline` (opt-in, Launchers and Announcements only).** For guidance that should live *inside* the page layout — a help button sitting natively in a toolbar, or a banner embedded at the top of a specific panel — the author designates a **container target** (an element with a stable `id` or `data-guide` attribute) and an insertion position (`first-child`, `last-child`, or `after-element`). The agent injects a single sized placeholder element into that container and renders the widget inside a shadow root attached to the placeholder, preserving full CSS isolation even though the widget participates in host layout flow.
+
+Inline mode is the only place the agent intentionally writes into host DOM, so it carries explicit guardrails:
+
+1. **Framework resilience.** SPA reconciliation (React/Angular re-renders) can remove foreign children. The agent's scoped `MutationObserver` detects placeholder removal and re-injects, debounced and capped (default 5 retries per route); persistent removal downgrades the widget per rule 3. This scenario is a mandatory hostile-gallery case (§12): aggressive re-render loops in React and Angular clones must not defeat injection or leak duplicate placeholders.
+2. **Layout-shift discipline.** Inline widgets declare a fixed width/height envelope at authoring time so the placeholder reserves its space in a single paint (no CLS); Studio's live preview warns the author when the envelope would push page content or overflow the container.
+3. **Fail-open, downgraded.** If the container is not found, or injection fails after retries, Launchers fall back automatically to `overlay` placement beside the anchor; embedded Announcements silently do not render. In no case does a failed injection disturb the host page.
+4. **Tenant gating.** Inline mode is disabled by default and enabled per tenant by the Tenant Admin, with host-application-team sign-off recorded as part of onboarding (§10) — app owners stay in control of anything that appears inside their layouts. Every inline injection is attributable via the audit trail to the authored item and its approver.
+
+Note the distinction from anchoring: giving an element a stable `id`/`data-guide` attribute already makes it a first-class *anchor* (§5.4) for overlay widgets at no extra risk; inline mode is specifically about rendering *within* that element, and is deliberately the more governed of the two.
+
+### 5.8 Targeting and segmentation
 
 Segments are authored as rule trees over: user attributes supplied by the host (role, department, tenure band, language, country — passed as a signed context token, §8.2), environment (URL patterns, route, element presence/state), behavior (first visit, flow completed/dismissed before, N-th session), and schedule windows. Rules compile server-side into a compact JSON rule bytecode shipped inside the bundle; the agent evaluates it locally in microseconds with no network round-trip. Rules classed as sensitive (entitlement-dependent visibility) can be flagged for server-side evaluation via the Targeting Service instead, trading a small latency cost for non-disclosure of the rule to the client.
 
@@ -158,7 +197,21 @@ The Studio is what makes this a WalkMe replacement rather than a widget library,
 
 Publishing compiles the relational model into one immutable JSON bundle per tenant × environment × locale: `{schema_version, tenant, generated_at, guides[], segments_bytecode, theme_tokens, signature}`. The bundle is signed (detached signature with a platform key held in the bank HSM; the agent pins the public key and refuses unsigned or invalid bundles), content-addressed (`bundle-<sha256>.json`), stored in the on-prem object store (bank-standard S3-compatible, e.g. MinIO), and cached at the edge indefinitely. Only the tiny manifest (≤1 KB, 60-second TTL) changes on publish — which is what makes rollback instantaneous.
 
-### 7.3 Analytics model (spool → ClickHouse)
+### 7.3 Media & asset management (images in widgets)
+
+Images are first-class, governed content assets available to **every widget type** — Flow steps, Tips, Announcements/ShoutOuts (banner imagery), Surveys (branded headers), and Launchers (custom icons).
+
+**Upload pipeline.** Authors upload images through the Studio web console only. The Content Service enforces, in order: format allow-list (PNG, JPG, WebP, GIF, SVG); size cap (default 500 KB, configurable per tenant) and dimension limits; anti-malware scan via the bank's standard AV service; and **SVG sanitization** — a server-side sanitizer strips scripts, event handlers, `foreignObject`, and external references, since SVG is otherwise an XSS vector. Accepted assets are stored in the on-prem object store, content-addressed (`img-<sha256>.<ext>`), scoped to the owning tenant, with uploader identity recorded in the audit log.
+
+**Reference model.** The rich-text AST references images by **asset ID only** — arbitrary or external URLs are rejected by schema. This is a deliberate security and sovereignty property: no hot-linked external image can act as a tracking beacon or introduce a dependency outside the bank, and every pixel shown to users has passed the validation pipeline.
+
+**Per-locale variants.** An asset ID may resolve to locale-specific variants (e.g., an English LTR screenshot vs. an Arabic RTL screenshot of the same screen), following the same locale fallback chain as text. Authors are warned in Studio when a guide with locale-variant text references a single-locale screenshot — an LTR screenshot inside an RTL walk-thru is a common localization defect this prevents.
+
+**Delivery.** Images are served from the same edge tier as content bundles with indefinite caching (content-addressing makes them immutable), so they add no origin load and work identically from restricted-market edge nodes. Alt text is mandatory at authoring time (WCAG). Host applications extend `img-src` to the platform origin — one additional line on top of the documented CSP delta in §8.2, included in the tenant onboarding runbook.
+
+**Governance.** Images travel through the same maker-checker workflow as text: checkers approve rendered previews including imagery; published bundle manifests pin exact asset hashes, so rollback restores the precise prior visuals; orphaned assets (unreferenced by any published version beyond retention) are garbage-collected on schedule.
+
+### 7.4 Analytics model (spool → ClickHouse)
 
 **Ingestion durability without a message broker.** The bank does not operate Kafka, and at this platform's volume (~3M events/day, ≈35 events/s average) introducing a new distributed messaging system would add operational burden without benefit. Instead, each Collector pod appends validated event batches to a **local durable disk spool** (append-only, size-capped for ~48 hours of peak traffic on persistent volumes); a background writer drains the spool into ClickHouse using native batched async inserts every few seconds — the write pattern ClickHouse is optimized for. If ClickHouse is unavailable, events accumulate in the spool and drain on recovery; if a spool approaches capacity, oldest analytics events are dropped first (guidance delivery is never affected — analytics remains strictly non-critical-path). Alerting jobs (anchor-fail spikes, agent errors) run as scheduled ClickHouse queries every 1–5 minutes feeding Grafana alerts, replacing stream processing. The Collector's internal interface is broker-shaped, so if the event stream later becomes an enterprise-wide data source with many downstream consumers, the spool can be swapped for Kafka or the bank's standard MQ without changes to the agent, schema, or ClickHouse model.
 
@@ -178,7 +231,7 @@ Primary risks: **T1** — the agent as an XSS vector into banking screens via au
 
 **Identity and context (T1/T3).** The agent never authenticates users. The host application, already holding an SSO session (bank-standard SAML/OIDC via the enterprise IdP), obtains a short-lived **context token** from the Identity Adapter: a signed claim set containing `anon_user_hash` (HMAC of the enterprise user ID with a per-tenant key — irreversible by the DAP), role, department, country, and locale. The agent receives this token from the host page, uses it for targeting evaluation and analytics attribution, and forwards it on Collector calls. No passwords, session cookies, or PII cross the DAP boundary.
 
-**PII minimization (T3).** No input-value capture, no DOM content in events, survey free-text scrubbing (§7.3), analytics retention of 13 months with shorter per-tenant windows configurable, and the anonymization HMAC key held by each tenant's application team — the DAP cannot re-identify users even if compromised.
+**PII minimization (T3).** No input-value capture, no DOM content in events, survey free-text scrubbing (§7.4), analytics retention of 13 months with shorter per-tenant windows configurable, and the anonymization HMAC key held by each tenant's application team — the DAP cannot re-identify users even if compromised.
 
 **Studio hardening (T4).** Extension distributed only via enterprise browser policy to the `dap-authors` AD group; design mode functions only on allow-listed origins; all Studio APIs require SSO with step-up MFA for publish actions; extension code passes the same SDLC gates as the agent.
 
