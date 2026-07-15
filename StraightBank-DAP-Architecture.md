@@ -32,7 +32,7 @@ Native mobile SDKs (iOS/Android), thick-client desktop applications, session-rep
 | # | Decision | Rationale |
 |---|----------|-----------|
 | AD-01 | Zero third-party code in the browser runtime | Eliminates supply-chain CVE exposure and license drift; the core reason for leaving WalkMe applies equally to OSS runtime libraries |
-| AD-02 | Standard OSS permitted server-side and in tooling | PostgreSQL, ClickHouse, Kafka, Nginx run inside the DC and never ship to users; rewriting them adds no security value |
+| AD-02 | Standard OSS permitted server-side and in tooling | PostgreSQL, ClickHouse, Nginx run inside the DC and never ship to users; rewriting them adds no security value |
 | AD-03 | On-prem, active-active across two data centers | Sovereignty, restricted-market access, DR posture consistent with bank standards |
 | AD-04 | Guidance content is data, not code | Guides compile to signed, versioned, immutable JSON bundles; the agent is a generic interpreter. Publishing content never redeploys software |
 | AD-05 | Single lightweight agent, multi-tenant | One snippet serves every application; tenant resolved by API key + origin; enterprise reuse is native |
@@ -64,9 +64,9 @@ Native mobile SDKs (iOS/Android), thick-client desktop applications, session-rep
 │  Analytics Collector · Identity Adapter · Admin Service                  │
 └──────┬───────────────┬──────────────────┬────────────────────────────────┘
        ▼               ▼                  ▼
-  PostgreSQL      Object store       Kafka → ClickHouse → Superset/Grafana
-  (content,       (published         (event stream)      (dashboards)
-   config, audit)  bundles, media)
+  PostgreSQL      Object store       Spool → ClickHouse → Superset/Grafana
+  (content,       (published         (durable buffer,     (dashboards)
+   config, audit)  bundles, media)     batched inserts)
                 ▲
 ┌───────────────┴──────────────────────────────────────────────────────────┐
 │  AUTHORING & GOVERNANCE                                                   │
@@ -84,7 +84,7 @@ Native mobile SDKs (iOS/Android), thick-client desktop applications, session-rep
 | Content Service | Stateful service | CRUD for guides/steps/segments/translations; versioning; maker-checker workflow; publish pipeline |
 | Targeting Service | Stateless service | Compiles segment definitions into rule bytecode embedded in bundles; server-side evaluation API for sensitive rules |
 | Identity Adapter | Stateless service | Validates host-app-issued context tokens (OIDC/SAML claims → hashed DAP context) |
-| Analytics Collector | Stateless service | Ingests batched agent events, validates schema, strips/rejects anything resembling PII, writes to Kafka |
+| Analytics Collector | Stateless service | Ingests batched agent events, validates schema, strips/rejects anything resembling PII, appends to a local durable disk spool; a background writer batch-inserts into ClickHouse |
 | Analytics Store & BI | ClickHouse + Superset/Grafana | Funnels, completion rates, drop-off, survey results, per-tenant dashboards |
 | Authoring Studio | Custom browser extension + web console | Visual element picker, WYSIWYG step editor, live preview on the real application, flow designer |
 | Admin Service | Service + console | Tenants, environments, API keys, RBAC, audit log query, kill switches |
@@ -158,7 +158,9 @@ The Studio is what makes this a WalkMe replacement rather than a widget library,
 
 Publishing compiles the relational model into one immutable JSON bundle per tenant × environment × locale: `{schema_version, tenant, generated_at, guides[], segments_bytecode, theme_tokens, signature}`. The bundle is signed (detached signature with a platform key held in the bank HSM; the agent pins the public key and refuses unsigned or invalid bundles), content-addressed (`bundle-<sha256>.json`), stored in the on-prem object store (bank-standard S3-compatible, e.g. MinIO), and cached at the edge indefinitely. Only the tiny manifest (≤1 KB, 60-second TTL) changes on publish — which is what makes rollback instantaneous.
 
-### 7.3 Analytics model (Kafka → ClickHouse)
+### 7.3 Analytics model (spool → ClickHouse)
+
+**Ingestion durability without a message broker.** The bank does not operate Kafka, and at this platform's volume (~3M events/day, ≈35 events/s average) introducing a new distributed messaging system would add operational burden without benefit. Instead, each Collector pod appends validated event batches to a **local durable disk spool** (append-only, size-capped for ~48 hours of peak traffic on persistent volumes); a background writer drains the spool into ClickHouse using native batched async inserts every few seconds — the write pattern ClickHouse is optimized for. If ClickHouse is unavailable, events accumulate in the spool and drain on recovery; if a spool approaches capacity, oldest analytics events are dropped first (guidance delivery is never affected — analytics remains strictly non-critical-path). Alerting jobs (anchor-fail spikes, agent errors) run as scheduled ClickHouse queries every 1–5 minutes feeding Grafana alerts, replacing stream processing. The Collector's internal interface is broker-shaped, so if the event stream later becomes an enterprise-wide data source with many downstream consumers, the spool can be swapped for Kafka or the bank's standard MQ without changes to the agent, schema, or ClickHouse model.
 
 The agent batches events (≤20 events or 10 seconds; `navigator.sendBeacon` on unload) to the Collector. Event schema: `{tenant, env, anon_user_hash, session_id, event_type, guide_id, step_id, locale, ts, meta}` with `event_type ∈ {impression, flow_start, step_view, step_complete, flow_complete, flow_abandon, tip_hover, launcher_click, announcement_view, announcement_dismiss, survey_response, low_confidence_anchor, anchor_fail, agent_error}`. The Collector enforces the schema, rejects free-text fields except survey answers (which pass a PII-pattern scrubber: account-number, national-ID, email, phone classes), and never records input values, keystrokes, or page content. ClickHouse materialized views precompute funnel and drop-off aggregates; Superset serves per-tenant dashboards; a scheduled job alerts when a guide's `low_confidence_anchor`/`anchor_fail` rate spikes — the early-warning system for host-app UI changes.
 
@@ -188,11 +190,11 @@ Primary risks: **T1** — the agent as an XSS vector into banking screens via au
 
 ### 9.1 Topology
 
-Two on-prem data centers, active-active. Each DC runs: the edge tier (Nginx reverse proxy with proxy-cache for bundles, terminating internal TLS), the platform core on the bank's Kubernetes/OpenShift landing zone (Delivery, Content, Targeting, Identity Adapter, Collector, Admin — all stateless, HPA-scaled), PostgreSQL (primary in DC1 with synchronous standby in DC2 under the bank's standard DB service; content workload is low-GB scale), the object store replicated across DCs, and Kafka + ClickHouse clusters spanning both DCs. The bank's standard GSLB fronts the edge tier. Users in restricted markets are served entirely from bank infrastructure with no third-country dependency — directly resolving the Middle East access constraint.
+Two on-prem data centers, active-active. Each DC runs: the edge tier (Nginx reverse proxy with proxy-cache for bundles, terminating internal TLS), the platform core on the bank's Kubernetes/OpenShift landing zone (Delivery, Content, Targeting, Identity Adapter, Collector, Admin — all stateless, HPA-scaled), PostgreSQL (primary in DC1 with synchronous standby in DC2 under the bank's standard DB service; content workload is low-GB scale), the object store replicated across DCs, and a ClickHouse replica pair spanning both DCs — each DC's Collectors spool locally on persistent volumes and batch-insert into their in-DC replica, so analytics ingestion continues through a full DC or database outage. The bank's standard GSLB fronts the edge tier. Users in restricted markets are served entirely from bank infrastructure with no third-country dependency — directly resolving the Middle East access constraint.
 
 ### 9.2 Sizing and performance targets
 
-Sixty thousand users generate trivially small read traffic thanks to immutability: steady-state load is manifest checks (≤1 KB, 60 s cache) plus rare bundle fetches after publishes. Targets: manifest p99 < 50 ms from edge cache; bundle p99 < 150 ms; Collector sustained 2,000 events/s with 10,000/s burst (a Monday-morning announcement to all staff); agent main-thread cost on host pages < 50 ms total during boot; memory < 10 MB. Scaling to 150,000 users requires no architectural change — only Collector/ClickHouse horizontal scale.
+Sixty thousand users generate trivially small read traffic thanks to immutability: steady-state load is manifest checks (≤1 KB, 60 s cache) plus rare bundle fetches after publishes. Targets: manifest p99 < 50 ms from edge cache; bundle p99 < 150 ms; Collector sustained 2,000 events/s with 10,000/s burst (a Monday-morning announcement to all staff), backed by per-pod spools sized for ≥48 hours of peak volume; agent main-thread cost on host pages < 50 ms total during boot; memory < 10 MB. Scaling to 150,000 users requires no architectural change — only Collector/ClickHouse horizontal scale.
 
 ### 9.3 Environments and release management
 
