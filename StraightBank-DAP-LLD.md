@@ -538,6 +538,20 @@ Capture rules (mirror 1.5): stable-class filter regexes `/^css-[a-z0-9]{5,}$/`, 
 
 WYSIWYG: renders the actual agent widget in **preview mode** (agent loaded in `preview:true`, which disables beacons and frequency state) so what authors see is literally the production renderer. LTR/RTL toggle re-renders with forced direction. Record mode (manual v1): captures click targets into a draft step list (AI drafting arrives in v2 — leave the hook: recorded sessions POST to `/api/content/recordings` as inert JSON).
 
+### 4.1.1 Step authoring interactions (normative)
+
+The extension's side panel is a full step editor for the open flow draft. Required interactions:
+
+1. **Add step (append).** Panel button `+ Add step` arms the picker in *capture-for-new-step* mode (page cursor = crosshair, panel shows "Click the element for step N+1"). Clicking an element: captures the fingerprint (POST → `anch_id`), creates a step with defaults (`placement: "bottom-center"`, `backdrop: "none"`, `advance: [{on:"next_button", goto:"@next"}]`, `buttons: {next,back,exit}`), appends it to the draft, selects it, and opens the on-page editor bubble (interaction 4). `Esc` cancels capture mode without creating anything.
+2. **Insert between / reorder.** Hovering the gap between two step rows reveals an insert affordance (`+`) that arms the same capture mode with the target index; new step lands at that position and downstream default `@next` chains re-link automatically. Rows are drag-reorderable; reordering rewrites only implicit `@next` ordering — **explicit** `goto` targets are never silently rewritten; if a reorder makes an explicit target unreachable, the row shows a warning badge and the flow cannot be submitted until resolved (mirrors the console flow-map cycle/orphan checks).
+3. **Re-capture anchor.** A selected step's detail card offers `Re-pick element`, re-arming capture for that step only; the old fingerprint is replaced (new `anch_id`, old one garbage-collected if unreferenced).
+4. **On-page editor bubble.** Selecting a step renders the real widget at its anchor in preview mode with the title/body directly editable in place (contenteditable over the constrained rich-text schema — toolbar offers only the AST node set: bold/italic/lists/link/image-from-media-store). Placement is changed by dragging the bubble to another side (snaps to the 12 logical placements) or via the detail card; backdrop level and button set are detail-card selects. Every change live-updates the preview.
+5. **Advance rule picker.** Plain-language select per step: "when the user clicks the element" (`click/anchor`), "when the user clicks Next" (`next_button`), "when ⟨element⟩ appears" (arms a secondary capture for the wait-target, generates `wait` + `element_visible`), "after ⟨n⟩ seconds" (timer). Branching (`branch[]` with conditions) is deliberately **console-only** — the panel shows existing branches read-only with a "Edit branches in console" deep link.
+6. **Persistence.** Every panel mutation PATCHes the draft `guide_version` (debounced 2s, optimistic UI, conflict = 409 → reload prompt); there is no local-only state to lose. Draft-only rule: the panel refuses edits on non-`draft` versions and offers "Create new version" instead.
+7. **Flow-level actions.** Footer: `Preview` (runs the flow start-to-end on the page via the preview agent), `RTL`, `Submit` (draft→in_review; author role only — the extension can never approve or publish).
+
+Acceptance addition (Part 4 AC): from an empty draft, an author can build a 3-step flow — including one insert-between and one re-pick — entirely from the extension, and the resulting `guide_version.definition` validates against `guide.schema.json` with correctly linked transitions.
+
 ## 4.2 Console (`packages/studio-console`)
 
 React SPA served by `pnpm dev` (PoC — no login; a user/role switcher in the top bar sets the `X-Dev-User`/`X-Dev-Role` headers on every API call). Screens: Guide list/detail (definition editor is form-based over the schema — no raw JSON editing for authors; "advanced JSON" view read-only), Flow map (graph view of steps/transitions; client-side cycle detection warning), Review queue (rendered preview + JSON diff via `jsondiffpatch`-style custom differ — server-computed), Translations (grid per locale, XLIFF 2.0 export/import endpoint `/api/content/xliff`), Segments builder (rule tree UI → preview compiled ops count), Media library (upload, variants per locale, usage references), Publish screen (per env+locale checklist: untranslated strings, degraded anchors used, inline-mode items needing tenant flag), Insights (PoC: built-in funnel/summary screens querying the Collector's read API over the PG events table; prod: embedded Superset), Admin (dev-role assignments, kill switch).
@@ -604,8 +618,54 @@ Two interactive HTML mockups accompany this LLD as the wireframe-fidelity refere
 - **Fingerprint signal list:** the detail card lists the captured signals in ranked order (data-guide/id first) in monospace; `data-guide` capture is labeled as a short-circuit match.
 - **Contextual warnings (must-implement set):** no id/data-guide present → "request data-guide from app team"; text-signal-dependent anchor on a multi-locale guide → "variant capture advised for <locale>"; below-threshold → skip warning as above.
 - **Step editor panel:** docked right, 236px reference width; step rows show anchor-health-colored anchor icon + step label + strength; selecting a row highlights the corresponding element on the page (bidirectional selection). Footer actions fixed: **Preview** (loads the production agent in `preview:true` — renderer parity is a hard requirement), **RTL** (forced-direction re-render), **Submit** (to review; author role can never publish).
+- **Step creation affordances:** the panel carries a persistent `+ Add step` button (arms capture-for-new-step mode; page cursor crosshair; Esc cancels) and gap-hover insert affordances between rows; a selected step's detail card offers `Re-pick element`. On capture, the new step opens the on-page editor bubble immediately — capture and copywriting are one continuous gesture (LLD §4.1.1 is normative for the full interaction set).
 - **Parity rule (AC):** the strength score displayed by the picker must match the runtime resolver's confidence within ±0.05 across the gallery matrix (restates Part 4 AC — the mockup makes the surfaced number normative UI).
 
 ## 9.3 Out-of-mockup screens
 
 Flow map (graph editor), Media upload dialog, and the recording-mode capture bar are specified textually in §4.1–4.2 and follow the same token set; mock them during Part 4 sprint 1 using `_tokens.css` before implementation.
+
+---
+
+# PART 10 — Delta Changelog (this revision) — implement only these changes
+
+**Purpose.** A full application was previously generated from the earlier LLD baseline (rev A: Node 20/NestJS backend, OIDC/mTLS authentication, containerized deployment, ClickHouse analytics, Parts 1–8 only). This part enumerates every change introduced in the current revision (rev B — PoC edition) so an implementing engineer or model can apply **only the delta** to the existing codebase. Anything not listed here is unchanged — do not refactor, rename, or "improve" untouched areas.
+
+## 10.1 Invariants — explicitly NOT changed (do not touch)
+
+- All wire formats and schemas: manifest, bundle, guide/step/anchor, rich-text AST, rule bytecode (opcodes, limits, vectors), analytics event schema, batch envelope (Part 1).
+- The agent (`packages/agent`) — all modules, budgets, algorithms — **except** the one context-fetch change in D3 below.
+- PostgreSQL DDL in §3.1 (one *additive* migration in D5; zero alterations to existing tables).
+- Object-store content-addressed layout and signing scheme (Ed25519 + JCS) — only the key *source* changes (D4).
+- Studio console screen set and workflows; maker-checker states and the maker≠checker DB constraint.
+- Gallery cases and Playwright suites (additions only in D8).
+
+## 10.2 Delta register
+
+| # | Change | LLD ref | Type |
+|---|---|---|---|
+| D1 | Backend re-implemented in **Java 21 / Spring Boot 3** (Maven multi-module under `services/`); NestJS services retired. Contracts (openapi.yaml per service), DB schema, and behaviors unchanged — the existing Node services are the behavioral reference | §0.1, Part 3 conventions | Re-platform |
+| D2 | **Authentication removed (PoC):** delete OIDC/Spring Security/mTLS; add `DevIdentityFilter` reading `X-Dev-User` / `X-Dev-Role`; console gains a user/role switcher that sets these headers on every API call; MFA step-up on publish/kill removed | PoC scope box; Part 3 conventions; §3.2, §3.7, §4.2 | Removal + small feature |
+| D3 | **Context token simplified:** Identity Adapter becomes a stub — `GET /api/idp/context?user=<name>` returning plain JSON claims from `dev-users.yaml` personas; HMAC pseudonymization retained (local key). Agent `kernel/context.ts`: parse plain JSON instead of JWS; forward as-is in `X-Compass-Ctx`; wrap behind a `ContextProvider` interface | §2.2.4, §3.4 | Simplification |
+| D4 | **Signing keys local:** publish pipeline signs with dev Ed25519 keypair from `var/keys/` (generated by `infra/local/keygen`) instead of KMS/HSM; agent pinned-key map points at the dev public key for PoC builds | §3.2.1, Part 3 conventions | Config/source change |
+| D5 | **ClickHouse deferred:** Collector's spool writer targets a new PostgreSQL `events` table via an `EventSink` interface (batched jOOQ inserts ≤5k rows); additive migration `V90__poc_events.sql` (same columns as the CH design + btree on (tenant, e, ts)); funnel as a SQL VIEW; Grafana/CH alert queries replaced by nothing in PoC (Insights reads the PG table) | §3.5, §3.6 | Re-target behind interface |
+| D6 | **Containerization removed:** no Docker/K8s/Helm/Argo; services run as local processes; add `infra/local/run.sh` (ordered start) and `infra/local/keygen`; object store = local directory `var/objectstore/` with identical content-addressed paths; Testcontainers-based tests → integration profile `it-local` against local PostgreSQL | PoC scope box; §0.1 | Removal + local tooling |
+| D7 | **PoC relaxations:** media AV scan (ICAP) step removed — SVG sanitization **stays**; Delivery CORS permissive (`*`); rate limiting, SIEM export, Prometheus scraping dropped (Actuator endpoints only); Superset embed → built-in Insights screens querying a small Collector read API over the PG events table | §3.2, §3.3, §4.2, Part 5 | Removal |
+| D8 | **NEW §4.1.1 — step authoring interactions** in the extension: `+ Add step` capture mode, insert-between with `@next` re-linking (explicit `goto` never rewritten; unreachable target blocks submit), per-step `Re-pick element`, on-page editor bubble (in-place title/body editing over the constrained AST, drag-to-snap placement), plain-language advance-rule picker incl. secondary capture for wait-targets, branching console-only, debounced PATCH persistence with 409 handling, draft-only editing. New AC: 3-step flow built entirely in the extension (one insert-between + one re-pick) validating against `guide.schema.json` | §4.1.1; Part 9.2 | New feature |
+| D9 | **NEW Part 9 — UI reference mockups** as normative design source: `mockup-studio-console.html`, `mockup-studio-extension.html`, `_tokens.css`; console/extension must match the documented layout, badge vocabulary, strength thresholds/colors (≥0.85 / 0.60–0.84 / <0.60 with skip warning), and picker↔runtime confidence parity ±0.05 | Part 9 | New reference + AC |
+
+## 10.3 Suggested implementation order & acceptance per delta
+
+1. **D6 + D4** (local runtime + keys) — foundation. ✔ `run.sh` boots Delivery + Content against local PG; keygen produces a keypair; a hand-published bundle verifies in the agent with the dev key.
+2. **D1** (Java services) — port service-by-service in ascending complexity (Delivery → Identity stub → Admin → Collector → Targeting → Content), validating each against its frozen `openapi.yaml` and the existing e2e suite; retire the corresponding Node service only after its Java twin passes. ✔ Part-3 ACs green on Java.
+3. **D2 + D3** together (they share the identity seam). ✔ Console role switcher drives maker-checker end-to-end single-handed; agent targeting matches `dev-users.yaml` personas.
+4. **D5** — implement `EventSink` + PG sink + `V90` migration. ✔ 30-min PG outage soak at 500 eps, zero loss (spool absorbs); Insights screens render funnels from PG.
+5. **D7** — strip the listed controls; confirm SVG sanitizer still active via its vector tests.
+6. **D8** — extension step authoring. ✔ new §4.1.1 AC passes as a Playwright script on the gallery demo app.
+7. **D9** — reconcile console/extension UI against the mockups. ✔ Part 9.2 checklist walked; picker/runtime parity test green.
+
+## 10.4 Delta hygiene rules for the implementing model
+
+- One delta = one PR series; PR descriptions cite the D-number and LLD section.
+- Where a delta *removes* a capability (auth, AV, CORS, Prometheus, CH), leave the seam: a named interface, a no-op filter, or a config flag with a `// PROD:` comment referencing the HLD section that restores it — the production edition reinstates these without archaeology.
+- If any delta appears to require changing an invariant in 10.1, stop and flag it — that indicates a misreading, not a necessary change.

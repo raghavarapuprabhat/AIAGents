@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compass Studio extension — element picker mockup (LLD Part 9)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.30.0/tabler-icons.min.css">
+<link rel="stylesheet" href="_tokens.css">
+</head>
+<body>
+<div class="frame">
+<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Compass Studio extension · element picker and step editor · LLD Part 9.2 / §4.1.1 — hover outlined elements, click to capture · use “+ Add step”, then click an element (Amount is not yet a step) to create a step</p>
+<div style="border:0.5px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2);font-size:13px">
+  <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:0.5px solid var(--border);background:var(--surface-1)">
+    <span style="display:flex;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:#F09595"></span><span style="width:9px;height:9px;border-radius:50%;background:#FAC775"></span><span style="width:9px;height:9px;border-radius:50%;background:#9FE1CB"></span></span>
+    <span style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--text-muted)">uat.straightbank.internal/payments/international</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 9px;font-size:11px"><i class="ti ti-compass" style="font-size:13px"></i>Compass · picker on</span>
+  </div>
+  <div style="display:flex;min-height:420px">
+    <div style="flex:1;min-width:0;padding:16px;position:relative">
+      <div style="font-size:15px;font-weight:500;margin-bottom:2px">International transfer</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">StraightBank · payments</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="pick" data-k="iban" style="border:1.5px dashed transparent;border-radius:var(--radius);padding:6px">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Recipient IBAN</div>
+          <input value="AE07 0331 2345 6789 0123 456" style="width:100%;font-family:var(--font-mono);font-size:12px">
+        </div>
+        <div class="pick" data-k="amount" style="border:1.5px dashed transparent;border-radius:var(--radius);padding:6px">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Amount</div>
+          <div style="display:flex;gap:8px"><input value="12,500.00" style="flex:1"><span style="border:0.5px solid var(--border);border-radius:var(--radius);padding:7px 12px;color:var(--text-secondary)">AED</span></div>
+        </div>
+        <div class="pick" data-k="charges" style="border:1.5px dashed transparent;border-radius:var(--radius);padding:6px">
+          <div style="background:var(--surface-1);border-radius:var(--radius);padding:9px 12px;font-size:12px;color:var(--text-secondary)">Charges: correspondent bank fee AED 55 · SHA</div>
+        </div>
+        <div class="pick" data-k="submit" style="border:1.5px dashed transparent;border-radius:var(--radius);padding:6px;align-self:flex-start">
+          <button style="background:var(--fill-primary);color:var(--on-primary);border:none;padding:8px 18px">Submit transfer</button>
+        </div>
+      </div>
+      <div id="chip" style="display:none;margin-top:12px;background:var(--surface-2);border:0.5px solid var(--border-strong);border-radius:var(--radius);padding:8px 12px;font-size:12px;max-width:360px"></div>
+    </div>
+    <aside style="width:236px;flex:none;border-left:0.5px solid var(--border);background:var(--surface-1);padding:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:6px;font-weight:500;font-size:13px"><i class="ti ti-route" style="font-size:15px"></i>First intl transfer · v15 draft</div>
+      <div id="steps" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button id="addstep" style="font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed"><i class="ti ti-plus" style="font-size:13px"></i>Add step</button>
+      <div id="armed" style="display:none;background:#EEEDFE;color:#3C3489;border-radius:6px;padding:6px 8px;font-size:11px"><i class="ti ti-crosshair" style="font-size:12px;vertical-align:-2px"></i> Click the element for the new step — Esc cancels</div>
+      <div id="detail" style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:10px;font-size:11px;line-height:1.6"></div>
+      <div style="display:flex;gap:6px;margin-top:auto">
+        <button style="flex:1;font-size:12px">Preview</button>
+        <button style="flex:1;font-size:12px">RTL</button>
+        <button style="flex:1;font-size:12px">Submit</button>
+      </div>
+    </aside>
+  </div>
+</div>
+</div>
+<script>
+const FP={
+iban:{name:"Recipient IBAN input",score:0.91,sig:['id = "iban-input"','aria label = "Recipient IBAN"','tag input · path form>div(1)'],warn:"Text-only signals weak in Arabic locale — variant capture advised",color:"#1D9E75"},
+amount:{name:"Amount field",score:0.74,sig:['name = "amt" · class subset [field]','aria label = "Amount"','geometry: mid-left, 200–320px'],warn:"No id or data-guide found — request data-guide from app team",color:"#BA7517"},
+charges:{name:"Charges banner",score:0.58,sig:['classes only [notice, muted] — volatile hash classes filtered','text = "charges: correspondent…"'],warn:"Below 0.60 runtime threshold — step would be skipped. Add data-guide.",color:"#A32D2D"},
+submit:{name:"Submit transfer button",score:0.97,sig:['data-guide = "submit-transfer" — short-circuit','role button · name "Submit transfer"'],warn:null,color:"#0F6E56"}};
+let steps=[{k:"iban",t:"s3 · Enter IBAN"},{k:"charges",t:"s4 · Review charges"},{k:"submit",t:"s5 · Submit transfer"}];
+let captureMode=false;
+const stepMeta={iban:{},charges:{},submit:{},amount:{t:"Enter the amount"}};
+const stepsEl=document.getElementById("steps"),detail=document.getElementById("detail"),chip=document.getElementById("chip");
+let sel="submit";
+function bar(s){const pct=Math.round(s*100);return `<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;height:6px;background:var(--surface-1);border-radius:3px"><div style="width:${pct}%;height:100%;border-radius:3px;background:${pct>=85?"#1D9E75":pct>=60?"#EF9F27":"#E24B4A"}"></div></div><span style="font-weight:500">${s.toFixed(2)}</span></div>`}
+function renderSteps(){stepsEl.innerHTML=steps.map(st=>{const f=FP[st.k],on=st.k===sel;return `<div data-k="${st.k}" class="strow" style="display:flex;align-items:center;gap:7px;background:${on?"var(--surface-2)":"transparent"};border:0.5px solid ${on?"var(--border-strong)":"var(--border)"};border-radius:var(--radius);padding:7px 9px;cursor:pointer;font-size:12px"><i class="ti ti-anchor" style="font-size:13px;color:${f.color}"></i><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${st.t}</span><span style="font-size:11px;color:var(--text-muted)">${f.score.toFixed(2)}</span></div>`}).join("");[...document.querySelectorAll(".strow")].forEach(r=>r.onclick=()=>select(r.dataset.k));}
+function renderDetail(k){const f=FP[k];detail.innerHTML=`<div style="font-weight:500;font-size:12px;margin-bottom:6px">${f.name}</div><div style="color:var(--text-muted);margin-bottom:4px">Anchor strength</div>${bar(f.score)}<div style="color:var(--text-muted);margin:8px 0 4px">Fingerprint signals</div>${f.sig.map(s=>`<div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${s}</div>`).join("")}${f.warn?`<div style="margin-top:8px;background:#FAEEDA;color:#633806;border-radius:6px;padding:6px 8px;font-size:11px"><i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:-2px"></i> ${f.warn}</div>`:`<div style="margin-top:8px;background:#E1F5EE;color:#085041;border-radius:6px;padding:6px 8px;font-size:11px"><i class="ti ti-check" style="font-size:12px;vertical-align:-2px"></i> Strong stable anchor</div>`}`;}
+function select(k){sel=k;renderSteps();renderDetail(k);[...document.querySelectorAll(".pick")].forEach(p=>{p.style.borderColor=p.dataset.k===k?FP[k].color:"transparent"});chip.style.display="block";const f=FP[k];chip.innerHTML=`<span style="font-weight:500">${f.name}</span> — captured as <span style="font-family:var(--font-mono);font-size:11px">anch_${k}9f</span> · strength ${f.score.toFixed(2)}`;}
+const addBtn=document.getElementById("addstep"),armed=document.getElementById("armed");
+function armCapture(on){captureMode=on;armed.style.display=on?"block":"none";addBtn.style.opacity=on?"0.5":"1";}
+addBtn.onclick=()=>armCapture(true);
+document.addEventListener("keydown",e=>{if(e.key==="Escape")armCapture(false);});
+function addStepFor(k){
+  if(steps.some(st=>st.k===k)){armCapture(false);select(k);return;}
+  const label=(stepMeta[k]&&stepMeta[k].t)||FP[k].name;
+  steps.push({k,t:`s${steps.length+3} · ${label}`});
+  armCapture(false);select(k);
+  const f=FP[k];
+  chip.style.display="block";
+  chip.innerHTML=`<span style="font-weight:500">New step created</span> — ${f.name} captured as <span style="font-family:var(--font-mono);font-size:11px">anch_${k}9f</span> · strength ${f.score.toFixed(2)} · defaults: bottom-center · advance on Next — edit copy in the on-page bubble`;
+}
+[...document.querySelectorAll(".pick")].forEach(p=>{p.onmouseenter=()=>{if(p.dataset.k!==sel)p.style.borderColor="#AFA9EC"};p.onmouseleave=()=>{if(p.dataset.k!==sel)p.style.borderColor="transparent"};p.onclick=()=>{captureMode?addStepFor(p.dataset.k):select(p.dataset.k)};p.style.cursor="crosshair";});
+select("submit");
+</script>
+</body>
+</html>
