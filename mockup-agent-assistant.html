@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compass agent — C1 in-app assistant mockup (AI LLD Part 18.3)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.30.0/tabler-icons.min.css">
+<link rel="stylesheet" href="_tokens.css">
+</head>
+<body>
+<div class="frame">
+<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Compass agent · C1 “Ask Compass” assistant widget · AI LLD Part 18.3 / §14.2 — rendered by the agent inside its closed shadow root, launched from the existing Assist panel ·
+<label style="display:inline-flex;align-items:center;gap:5px;margin-left:6px;cursor:pointer;color:var(--ai-fg)"><input type="checkbox" id="degtoggle" style="accent-color:var(--ai-fg);margin:0"> Simulate gateway outage (degraded static-search state, §14.2.4)</label></p>
+
+<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+  <!-- host page context, dimmed -->
+  <div style="flex:1;min-width:300px;border:0.5px solid var(--border);border-radius:12px;background:var(--surface-2);padding:16px;opacity:0.55">
+    <div style="font-size:15px;font-weight:500;margin-bottom:2px">Payments</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">StraightBank web · host application (untouched by the assistant)</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text-secondary)">Recent transfers · AED 12,500.00 · GB29 ····· 4402 · Completed</div>
+      <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text-secondary)">Recent transfers · AED 3,120.00 · AE07 ····· 2231 · Pending</div>
+      <button style="align-self:flex-start;background:var(--fill-primary);color:var(--on-primary);border:none;padding:8px 16px">New transfer</button>
+    </div>
+  </div>
+
+  <!-- assistant widget -->
+  <div style="width:340px;flex:none;border:0.5px solid var(--border-strong);border-radius:14px;background:var(--surface-2);overflow:hidden;box-shadow:0 8px 28px rgba(30,28,60,.10)">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:0.5px solid var(--border)">
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--ai-bg);color:var(--ai-fg)"><i class="ti ti-compass" style="font-size:14px"></i></span>
+      <div><div style="font-weight:500;font-size:13px">Ask Compass</div>
+      <div id="modeline" style="font-size:10px;color:var(--ai-fg)"><i class="ti ti-sparkles" style="font-size:10px;vertical-align:-1px"></i> AI-generated · answers come from StraightBank guidance</div></div>
+      <span style="margin-left:auto;color:var(--text-muted)"><i class="ti ti-x" style="font-size:15px"></i></span>
+    </div>
+
+    <div id="ai-mode">
+      <div style="padding:12px;display:flex;flex-direction:column;gap:10px;max-height:380px;overflow:auto">
+        <div style="align-self:flex-end;max-width:85%;background:var(--fill-primary);color:var(--on-primary);border-radius:12px 12px 3px 12px;padding:8px 11px;font-size:12px">How do I reverse an international payment?</div>
+        <div style="align-self:flex-start;max-width:92%;background:var(--surface-1);border-radius:12px 12px 12px 3px;padding:9px 11px;font-size:12px;line-height:1.55">
+          You can request a reversal from the transfer's detail screen: open <b>Payments → Recent transfers</b>, select the transfer, then choose <b>Request reversal</b>. Reversals are available while the status is <i>Pending</i>; completed transfers need a recall request instead <span style="font-size:10px;color:var(--ai-fg)">[1]</span>.
+          <div style="margin-top:8px"><button style="width:100%;background:var(--fill-primary);color:var(--on-primary);border:none;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px"><i class="ti ti-route" style="font-size:13px"></i>Show me — start walk-thru</button></div>
+          <div style="margin-top:8px;font-size:10px;color:var(--text-muted)">Sources · <span style="color:var(--ai-fg)">[1] Flow: Reverse a payment (v1)</span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:10px;color:var(--text-muted)"><i class="ti ti-thumb-up" style="font-size:13px;cursor:pointer"></i><i class="ti ti-thumb-down" style="font-size:13px;cursor:pointer"></i><a href="#" style="margin-left:auto">Contact support</a></div>
+        </div>
+        <div style="align-self:flex-end;max-width:85%;background:var(--fill-primary);color:var(--on-primary);border-radius:12px 12px 3px 12px;padding:8px 11px;font-size:12px">What FX rate will I get?</div>
+        <div style="align-self:flex-start;max-width:92%;background:var(--surface-1);border-radius:12px 12px 12px 3px;padding:9px 11px;font-size:12px;line-height:1.55;color:var(--text-secondary)">
+          I can only help with <b>how to use this application</b> — I can't answer questions about rates, products, or financial decisions. For rate information, please use the rates screen or contact your relationship manager.
+          <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:10px;color:var(--text-muted)"><span style="background:var(--ai-bg);color:var(--ai-fg);border-radius:8px;padding:1px 6px">scope limit</span><a href="#" style="margin-left:auto">Contact support</a></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;padding:10px 12px;border-top:0.5px solid var(--border)">
+        <input placeholder="Ask about using this app…" style="flex:1;font-size:12px">
+        <button style="background:var(--fill-primary);color:var(--on-primary);border:none;padding:7px 12px"><i class="ti ti-send-2" style="font-size:13px"></i></button>
+      </div>
+    </div>
+
+    <div id="deg-mode" style="display:none">
+      <div style="margin:12px;background:#FAEEDA;color:#633806;border-radius:var(--radius);padding:8px 10px;font-size:11px"><i class="ti ti-plug-x" style="font-size:12px;vertical-align:-2px"></i> Assistant is offline — showing guidance search. Walk-thrus, tips and all guidance keep working normally.</div>
+      <div style="padding:0 12px 12px">
+        <input placeholder="Search guidance…" value="reverse" style="width:100%;font-size:12px;margin-bottom:8px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface-1);border-radius:var(--radius);padding:9px 11px;font-size:12px;cursor:pointer"><i class="ti ti-route" style="font-size:14px;color:var(--text-muted)"></i>Reverse a payment<span style="margin-left:auto;font-size:10px;color:var(--text-muted)">Flow</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface-1);border-radius:var(--radius);padding:9px 11px;font-size:12px;cursor:pointer"><i class="ti ti-route" style="font-size:14px;color:var(--text-muted)"></i>First international transfer<span style="margin-left:auto;font-size:10px;color:var(--text-muted)">Flow</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface-1);border-radius:var(--radius);padding:9px 11px;font-size:12px;cursor:pointer"><i class="ti ti-bulb" style="font-size:14px;color:var(--text-muted)"></i>IBAN field validation tip<span style="margin-left:auto;font-size:10px;color:var(--text-muted)">Tip</span></div>
+        </div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:10px">Client-side search over the signed bundle — no network dependency (§14.2.4 fail-open).</div>
+      </div>
+    </div>
+  </div>
+</div>
+<p style="font-size:11px;color:var(--text-muted);margin-top:14px;max-width:720px">Normative (18.3): the AI label is always visible; every answer carries sources, 👍/👎 and a support escalation; “Show me” starts the signed, reviewed flow through the normal FSM — the model only selects it; scope-limit answers use the fixed redirect copy; ungrounded/empty retrieval renders the honest no-answer template; with the C1 flag off, the launcher entry reverts to the plain v1 Assist panel and this widget never loads.</p>
+</div>
+<script>
+document.getElementById("degtoggle").onchange=e=>{
+  const deg=e.target.checked;
+  document.getElementById("ai-mode").style.display=deg?"none":"block";
+  document.getElementById("deg-mode").style.display=deg?"block":"none";
+  document.getElementById("modeline").innerHTML=deg
+    ?'<i class="ti ti-plug-x" style="font-size:10px;vertical-align:-1px"></i> Offline — static guidance search'
+    :'<i class="ti ti-sparkles" style="font-size:10px;vertical-align:-1px"></i> AI-generated · answers come from StraightBank guidance';
+  document.getElementById("modeline").style.color=deg?"var(--text-muted)":"var(--ai-fg)";
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compass Studio console — UI reference mockup (AI LLD Part 18.1)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.30.0/tabler-icons.min.css">
+<link rel="stylesheet" href="_tokens.css">
+</head>
+<body>
+<div class="frame">
+<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Compass Studio console · UI reference mockup · rev C — LLD Part 9.1 + AI LLD Part 18.1 — click sidebar items to switch screens ·
+<label style="display:inline-flex;align-items:center;gap:5px;margin-left:8px;cursor:pointer;color:var(--ai-fg)"><input type="checkbox" id="aitoggle" checked style="accent-color:var(--ai-fg);margin:0"> AI capability flags <b id="aistate">ON</b></label>
+<span style="color:var(--text-muted)"> — toggle off to see the byte-for-byte v1 console (coexistence rule)</span></p>
+<div style="border:0.5px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2);font-size:13px">
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border)">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;background:var(--ai-bg);color:var(--ai-fg)"><i class="ti ti-compass" style="font-size:16px"></i></span>
+    <span style="font-weight:500;font-size:14px">Compass Studio</span>
+    <span style="margin-left:12px;display:inline-flex;align-items:center;gap:6px;border:0.5px solid var(--border);border-radius:var(--radius);padding:4px 10px;color:var(--text-secondary)">StraightBank web <i class="ti ti-chevron-down" style="font-size:14px"></i></span>
+    <span style="display:inline-flex;align-items:center;gap:6px;border:0.5px solid var(--border);border-radius:var(--radius);padding:4px 10px;color:var(--text-secondary)">UAT <i class="ti ti-chevron-down" style="font-size:14px"></i></span>
+    <span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;color:var(--text-secondary)"><i class="ti ti-bell" style="font-size:16px"></i>
+      <span style="width:26px;height:26px;border-radius:50%;background:var(--bg-accent);color:var(--text-accent);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:500">PK</span>
+    </span>
+  </div>
+  <div style="display:flex;min-height:470px">
+    <nav id="cnav" style="width:152px;flex:none;border-right:0.5px solid var(--border);padding:10px 8px;display:flex;flex-direction:column;gap:2px" aria-label="Console sections"></nav>
+    <main id="cmain" style="flex:1;min-width:0;padding:14px 16px;background:var(--surface-1)"></main>
+  </div>
+</div>
+</div>
+<script>
+function sendPrompt(t){alert("In-product action (chat handoff in live console): "+t)}
+let AI=true;
+const nav=[["guides","ti-route","Guides"],["review","ti-checklist","Review queue"],["trans","ti-language","Translations"],["seg","ti-users","Segments"],["media","ti-photo","Media"],["publish","ti-rocket","Publish"],["insights","ti-chart-bar","Insights"],["admin","ti-settings","Admin"],["ai","ti-sparkles","AI"]];
+const badge=(t,bg,fg)=>`<span style="background:${bg};color:${fg};font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap">${t}</span>`;
+const st={published:badge("Published","#E1F5EE","#085041"),review:badge("In review","#FAEEDA","#633806"),draft:badge("Draft","#F1EFE8","#444441"),degraded:badge("Anchor degraded","#FCEBEB","#791F1F"),ok:badge("Healthy","#E1F5EE","#085041"),machine:badge("Machine","#F1EFE8","#444441"),approved:badge("Approved","#E1F5EE","#085041")};
+const aiChip=t=>badge(`<i class="ti ti-sparkles" style="font-size:10px;vertical-align:-1px"></i> ${t}`,"var(--ai-bg)","var(--ai-fg)");
+const cell=s=>`padding:8px 10px;border-bottom:0.5px solid var(--border);${s||""}`;
+const grey=(html,tip)=>`<span title="${tip}" style="opacity:0.45;pointer-events:none;display:inline-flex;gap:8px">${html}</span>`;
+const offNote=t=>`<span style="font-size:11px;color:var(--text-muted)">${t}</span>`;
+
+const views={
+guides:()=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:15px;font-weight:500">Guides</span><input placeholder="Search guides" style="width:180px;margin-left:auto">
+${AI?`<button style="display:inline-flex;align-items:center;gap:6px;border-color:var(--ai-fg);color:var(--ai-fg)" onclick="sendPrompt('Draft with AI: From document (A1) / From recording (A5)')"><i class="ti ti-sparkles" style="font-size:13px"></i>Draft with AI <i class="ti ti-chevron-down" style="font-size:12px"></i></button>`
+:grey(`<button style="display:inline-flex;align-items:center;gap:6px"><i class="ti ti-sparkles" style="font-size:13px"></i>Draft with AI</button>`,"AI drafting is off for this tenant")}
+<button>New guide</button></div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px">
+${[["Published","24"],["In review","4"],["Degraded anchors","2"],["7-day completion","81%"]].map(m=>`<div style="background:var(--surface-2);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${m[0]}</div><div style="font-size:20px;font-weight:500;margin-top:2px">${m[1]}</div></div>`).join("")}</div>
+${AI?`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+${aiChip("Suggested backlog · B5")}<span style="font-size:12px;color:var(--text-secondary)">No guidance on <span style="font-family:var(--font-mono);font-size:11px">/payments/beneficiaries/*</span> — highest struggle + abandonment density this week (412 sessions)</span>
+<span style="margin-left:auto;display:flex;gap:6px"><button style="font-size:11px;padding:4px 10px">Plan</button><button style="font-size:11px;padding:4px 10px">Dismiss</button></span></div>`:""}
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden">
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
+<tr style="color:var(--text-muted);text-align:left"><th style="${cell("width:34%")}">Name</th><th style="${cell()}">Type</th><th style="${cell("width:22%")}">Status</th><th style="${cell()}">Locales</th><th style="${cell()}">Anchor health</th></tr>
+<tr><td style="${cell()}">First international transfer</td><td style="${cell()}">Flow · v14</td><td style="${cell()}">${st.published}</td><td style="${cell()}">en, ar</td><td style="${cell()}">${st.ok}</td></tr>
+<tr><td style="${cell()}">IBAN field validation tip</td><td style="${cell()}">Tip · v6</td><td style="${cell()}">${st.published}</td><td style="${cell()}">en, ar</td><td style="${cell()}">${st.degraded}</td></tr>
+<tr><td style="${cell()}">Quarterly NPS survey</td><td style="${cell()}">Survey · v2</td><td style="${cell()}">${st.review}</td><td style="${cell()}">en</td><td style="${cell()}">${st.ok}</td></tr>
+<tr><td style="${cell()}">Reverse a payment</td><td style="${cell()}">Flow · v1</td><td style="${cell()}">${st.review}${AI?" "+aiChip("AI draft"):""}</td><td style="${cell()}">en</td><td style="${cell()}">${st.ok}</td></tr>
+<tr><td style="${cell("border-bottom:none")}">New payments UI announcement</td><td style="${cell("border-bottom:none")}">Announcement · v1</td><td style="${cell("border-bottom:none")}">${st.draft}</td><td style="${cell("border-bottom:none")}">en</td><td style="${cell("border-bottom:none")}">—</td></tr>
+</table></div>`,
+
+review:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Review queue</div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">Quarterly NPS survey · v2</span>${st.review}<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Submitted by a.rahman · 2h ago</span></div>
+<div style="margin-top:10px;background:var(--surface-1);border-radius:var(--radius);padding:10px;font-family:var(--font-mono);font-size:11px;line-height:1.6">
+<div style="color:#791F1F;background:#FCEBEB;border-radius:4px;padding:1px 6px">- "frequency": { "policy": "once_ever" }</div>
+<div style="color:#085041;background:#E1F5EE;border-radius:4px;padding:1px 6px;margin-top:3px">+ "frequency": { "policy": "once_per_version", "snooze_days": 30 }</div></div>
+<div style="display:flex;gap:8px;margin-top:10px"><button style="border-color:var(--border-success);color:var(--text-success)">Approve</button><button style="border-color:var(--border-danger);color:var(--text-danger)">Reject with comment</button><button>Preview rendered</button></div></div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">Reverse a payment · v1</span>${st.review}${AI?aiChip("AI draft"):""}<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Drafted from SOP-PAY-114 by AI · anchors picked by p.kumar</span></div>
+<div style="margin-top:8px;background:var(--surface-1);border-radius:var(--radius);padding:8px 10px;font-size:11px;line-height:1.7">
+<div style="color:var(--text-muted);margin-bottom:2px">QA report (A4)</div>
+<div><span style="color:var(--text-danger)"><i class="ti ti-circle-x" style="font-size:12px;vertical-align:-2px"></i> QA_UNREACHABLE</span> · lint · step s4b has no inbound transition — <b>blocks submit</b></div>
+${AI?`<div>${aiChip("AI")} advisory · s2 body reads at grade 11 — target ≤ 8; suggested simpler phrasing available via Copy assist</div>`:`<div style="color:var(--text-muted)">model layer: unavailable (AI off) — lint findings only</div>`}
+</div>
+<div style="display:flex;gap:8px;margin-top:10px"><button style="border-color:var(--border-success);color:var(--text-success)">Approve</button><button style="border-color:var(--border-danger);color:var(--text-danger)">Reject with comment</button><button>Preview rendered</button></div></div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">IBAN tip · anchor rebaseline</span>${AI?aiChip("AI heal proposal · B1"):badge("Heal proposal","var(--ai-bg)","var(--ai-fg)")}<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Auto-flagged · confidence 0.62 → 0.97</span></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-top:6px">Primary id selector broke after host release 4.2. New fingerprint captured against data-guide="iban-input".${AI?` <span style="color:var(--text-muted)">Verified deterministically by the shared resolver — accept routes through the standard rebaseline approval.</span>`:""}</div>
+<div style="display:flex;gap:8px;margin-top:10px"><button style="border-color:var(--border-success);color:var(--text-success)">Accept rebaseline</button><button>Open in heal queue</button></div></div>`,
+
+publish:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Publish · StraightBank web · UAT → prod</div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:12px">
+${[["ti-check","4 approved items ready (2 flows, 1 tip, 1 survey)","#085041"],["ti-check","Arabic translations approved for all published items","#085041"],["ti-alert-triangle","1 item references a degraded anchor (IBAN tip) — heal pending","#854F0B"],["ti-check","No inline-mode items (tenant flag off)","#085041"],["ti-check","Bundle lint: no PII patterns in assembled content","#085041"]].concat(AI?[["ti-check","AI-assisted items: 1 — all human-approved (maker-checker)","#085041"]]:[]).map(r=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:0.5px solid var(--border)"><i class="ti ${r[0]}" style="font-size:15px;color:${r[2]}"></i><span>${r[1]}</span></div>`).join("")}
+<div style="display:flex;align-items:center;gap:10px;margin-top:12px"><button style="background:var(--fill-primary);color:var(--on-primary);border:none">Publish to prod</button><span style="font-size:11px;color:var(--text-muted)"><i class="ti ti-lock" style="font-size:13px;vertical-align:-2px"></i> Step-up MFA required · signed Ed25519 · rollback available${AI?" · publish re-indexes the assistant (C1)":""}</span></div></div>
+<div style="font-size:12px;color:var(--text-secondary)">Last publish: bundle-3f9c…e2 · 2026-07-12 09:14 by r.iyer · <a href="#">View publish history</a></div>`,
+
+insights:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:8px">Insights · First international transfer (v14)${AI?`<span style="margin-left:auto">${aiChip("Weekly digest · Mon 08:00")}</span>`:""}</div>
+${AI?`<div style="background:var(--surface-2);border:0.5px solid var(--ai-fg);border-radius:var(--radius);padding:10px 12px;margin-bottom:12px">
+<div style="display:flex;gap:8px;align-items:center"><i class="ti ti-sparkles" style="font-size:14px;color:var(--ai-fg)"></i><input placeholder="Ask Compass — e.g. why did step 3 completion drop last week?" style="flex:1;border:none;background:transparent;padding:2px 0" onkeydown="if(event.key==='Enter')sendPrompt('Insights copilot (B3): '+this.value)"></div>
+<div style="margin-top:8px;background:var(--surface-1);border-radius:var(--radius);padding:9px 11px;font-size:12px;color:var(--text-secondary)"><b style="color:var(--text-primary)">Why did step 3 completion drop last week?</b><br>Step s3 (Enter IBAN) completion fell from <b>93%</b> to <b>88%</b> (−5 pts, wk 32 vs 31). The drop is concentrated in the Arabic cohort (−9 pts) and coincides with the anchor for the IBAN input degrading after host release 4.2 — 61% of the drop sessions carry a low-confidence-anchor event. A heal proposal is waiting in the review queue.<div style="font-size:10px;color:var(--text-muted);margin-top:5px">from query template funnel-cohort-compare · numbers verbatim from analytics · AI-generated phrasing</div></div></div>`
+:`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:9px 12px;margin-bottom:12px;font-size:12px;color:var(--text-muted)">Insights copilot is off — dashboards below are the v1 experience.</div>`}
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px">
+${[["Flow starts (7d)","1,284"],["Completion","81%"],["Median duration","2m 40s"]].map(m=>`<div style="background:var(--surface-2);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${m[0]}</div><div style="font-size:20px;font-weight:500;margin-top:2px">${m[1]}</div></div>`).join("")}</div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px">
+<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Step funnel</div>
+${[["s1 · Open payments menu",100],["s2 · Choose international",96],["s3 · Enter IBAN",88],["s4 · Review charges",83],["s5 · Submit transfer",81]].map(s=>`<div style="display:flex;align-items:center;gap:10px;margin:7px 0"><span style="width:170px;flex:none;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s[0]}</span><div style="flex:1;height:14px;background:var(--surface-1);border-radius:7px"><div style="width:${s[1]}%;height:100%;border-radius:7px;background:#7F77DD"></div></div><span style="width:36px;text-align:right;font-size:12px">${s[1]}%</span></div>`).join("")}
+<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Largest drop: s2 → s3 (−8 pts) · Arabic cohort completes 4 pts lower</div></div>
+${AI?`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:12px">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">Top verbatim themes (7d)</span>${aiChip("B4")}</div>
+${[["Charges shown too late in the flow","neg","31"],["IBAN example format helped","pos","19"],["Arabic labels truncated on step 4","neg","12"]].map(t=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;color:var(--text-secondary)"><i class="ti ${t[1]==="neg"?"ti-mood-sad":"ti-mood-smile"}" style="font-size:14px;color:${t[1]==="neg"?"var(--text-danger)":"var(--text-success)"}"></i>${t[0]}<span style="margin-left:auto;color:var(--text-muted)">${t[2]} mentions</span></div>`).join("")}</div>`:""}`,
+
+trans:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Translations · First international transfer</div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden"><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
+<tr style="color:var(--text-muted);text-align:left"><th style="${cell("width:20%")}">Key</th><th style="${cell()}">English (source)</th><th style="${cell()}">Arabic</th><th style="${cell("width:24%")}">Status</th></tr>
+<tr><td style="${cell()}">t.s1.title</td><td style="${cell()}">Open the payments menu</td><td style="${cell()}" dir="rtl">افتح قائمة المدفوعات</td><td style="${cell()}">${st.approved}</td></tr>
+<tr><td style="${cell("border-bottom:none")}">t.s3.body</td><td style="${cell("border-bottom:none")}">Enter the recipient IBAN</td><td style="${cell("border-bottom:none")}" dir="rtl">أدخل رقم الآيبان للمستلم</td><td style="${cell("border-bottom:none")}">${st.machine}${AI?`<div style="font-size:10px;color:var(--ai-fg);margin-top:2px"><i class="ti ti-sparkles" style="font-size:10px;vertical-align:-1px"></i> AI · glossary enforced</div>`:""}</td></tr>
+</table></div>
+<div style="display:flex;gap:8px;margin-top:10px;align-items:center"><button>Export XLIFF</button><button>Import XLIFF</button><button>Preview RTL</button>
+${AI?`<button style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;border-color:var(--ai-fg);color:var(--ai-fg)" onclick="sendPrompt('AI pre-translate missing keys (A3) — output lands as status=machine for linguistic review')"><i class="ti ti-sparkles" style="font-size:13px"></i>AI pre-translate missing</button>`
+:`<span style="margin-left:auto">${grey(`<button style="display:inline-flex;align-items:center;gap:6px"><i class="ti ti-sparkles" style="font-size:13px"></i>AI pre-translate missing</button>`,"Translation assist is off for this tenant")}</span>`}</div>
+${AI?`<div style="font-size:11px;color:var(--text-muted);margin-top:8px">AI fills only missing/stale keys as <b>machine</b> — human review to <b>approved</b> is unchanged, and publish still refuses incomplete locales.</div>`:""}`,
+
+seg:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Segments</div><div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px"><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">seg_new_joiners</span>${badge("Client-side","#E6F1FB","#0C447C")}<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Compiled: 41 ops</span></div><div style="margin-top:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);line-height:1.7">role IN ["teller","ops"]<br>AND tenure_band = "0-6m"<br>AND url MATCH "/payments/*"</div></div>
+${AI?`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:10px"><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">seg_novice_depth</span>${badge("Client-side","#E6F1FB","#0C447C")}${aiChip("uses depth claim · C2")}<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Compiled: 12 ops</span></div><div style="margin-top:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);line-height:1.7">depth = "full"</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">depth ∈ full | tips | minimal is computed nightly per user; authors define the variants — the rule engine, not the model, decides what renders.</div></div>`:""}`,
+
+media:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Media library</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">${[["ti-photo","intl-screen-en.png","en · 84 KB"],["ti-photo","intl-screen-ar.png","ar variant · 86 KB"],["ti-photo","help-icon.svg","sanitized · 3 KB"]].map(a=>`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center"><i class="ti ${a[0]}" style="font-size:24px;color:var(--text-muted)"></i><div style="font-size:12px;margin-top:6px">${a[1]}</div><div style="font-size:11px;color:var(--text-muted)">${a[2]}</div></div>`).join("")}</div>`,
+
+admin:()=>`<div style="font-size:15px;font-weight:500;margin-bottom:12px">Admin · StraightBank web</div><div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><i class="ti ti-power" style="font-size:16px;color:var(--text-danger)"></i><div><div style="font-weight:500">Kill switch</div><div style="font-size:11px;color:var(--text-muted)">Disables the agent fleet-wide within 60 seconds · MFA required</div></div><button style="margin-left:auto;border-color:var(--border-danger);color:var(--text-danger)">Activate</button></div></div><div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px"><div style="font-weight:500;margin-bottom:6px">Roles</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.8">Authors · dap-authors-sbweb (12) &nbsp;·&nbsp; Reviewers · dap-reviewers-sbweb (4) &nbsp;·&nbsp; Releasers · dap-releasers-sbweb (2)</div></div>`,
+
+ai:()=>{const cap=[["Tier 1 · Assist","A1 Draft from document","draft_from_doc",true],["","A2 Copy assistant","copy_assist",true],["","A3 Translation assist","translate_assist",true],["","A4 QA copilot","qa_copilot",true],["","A5 Draft from recording","draft_from_recording",true],["Tier 2 · Advise","B1 Semantic anchor healing","anchor_heal",true],["","B2 Struggle detection","struggle_detect",true],["","B3 Insights copilot","insights_copilot",true],["","B4 Verbatim intelligence","verbatim_intel",true],["","B5 Guidance gap mining","gap_mining",true],["Tier 3 · Act","C1 In-app assistant","assistant",true],["","C2 Adaptive guidance depth","adaptive_depth",false],["","C3 Conversational surveys","conv_surveys",false]];
+return `<div style="font-size:15px;font-weight:500;margin-bottom:4px;display:flex;align-items:center;gap:8px"><i class="ti ti-sparkles" style="font-size:16px;color:var(--ai-fg)"></i>AI · StraightBank web · UAT</div>
+<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Capability register — every toggle maps 1:1 to a bank AI-policy decision. <b>All AI off = the platform runs exactly as v1.</b></div>
+${AI?"":`<div style="background:#FAEEDA;color:#633806;border-radius:var(--radius);padding:8px 11px;font-size:12px;margin-bottom:10px"><i class="ti ti-alert-triangle" style="font-size:13px;vertical-align:-2px"></i> AI is globally disabled — all capabilities below are inactive regardless of their per-tenant setting.</div>`}
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:12px">
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
+<tr style="color:var(--text-muted);text-align:left"><th style="${cell("width:20%")}">Tier</th><th style="${cell("width:36%")}">Capability</th><th style="${cell()}">Status</th><th style="${cell()}">Model route</th></tr>
+${cap.map((c,i)=>{const on=AI&&c[3];const last=i===cap.length-1?"border-bottom:none":"";return `<tr><td style="${cell(last)}color:var(--text-muted)">${c[0]}</td><td style="${cell(last)}">${c[1]}</td><td style="${cell(last)}">${on?badge("On","#E1F5EE","#085041"):badge("Off","#F1EFE8","#444441")}</td><td style="${cell(last)}color:var(--text-secondary)">${c[3]?"on-prem (local)":"—"}</td></tr>`}).join("")}
+</table></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px"><div style="display:flex;align-items:center;gap:10px"><i class="ti ti-power" style="font-size:16px;color:var(--text-danger)"></i><div><div style="font-weight:500">AI kill switch</div><div style="font-size:11px;color:var(--text-muted)">Independent of the platform kill switch · APIs ≤5s, agents ≤60s · guidance delivery unaffected</div></div><button style="margin-left:auto;border-color:var(--border-danger);color:var(--text-danger)">Activate</button></div></div>
+<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px"><div style="font-weight:500;margin-bottom:4px">Model routing</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">Default: on-prem open-weight (pinned, vendored)<br>External (Anthropic API): <b>disabled by policy</b><br>PII shield: mandatory on all routes · prompts audited 13 months</div></div>
+</div>`;}
+};
+const navEl=document.getElementById("cnav"),mainEl=document.getElementById("cmain");
+let current="guides";
+function go(k){current=k;mainEl.innerHTML=views[k]();[...navEl.children].forEach(b=>{const on=b.dataset.k===k;b.style.background=on?"var(--surface-1)":"transparent";b.style.color=on?(b.dataset.k==="ai"?"var(--ai-fg)":"var(--text-primary)"):(b.dataset.k==="ai"?"var(--ai-fg)":"var(--text-secondary)");b.style.fontWeight=on?"500":"400"});}
+nav.forEach(n=>{const b=document.createElement("button");b.dataset.k=n[0];b.style.cssText="display:flex;align-items:center;gap:8px;border:none;background:transparent;padding:7px 10px;border-radius:var(--radius);font-size:13px;cursor:pointer;text-align:left;width:100%";b.innerHTML=`<i class="ti ${n[1]}" style="font-size:16px"></i>${n[2]}`;b.onclick=()=>go(n[0]);navEl.appendChild(b);});
+document.getElementById("aitoggle").onchange=e=>{AI=e.target.checked;document.getElementById("aistate").textContent=AI?"ON":"OFF";go(current);};
+go("guides");
+</script>
+</body>
+</html>
