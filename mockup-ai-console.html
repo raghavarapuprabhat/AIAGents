@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compass Studio console — AI capabilities mockup (AI LLD Part 9.1)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.30.0/tabler-icons.min.css">
+<link rel="stylesheet" href="_tokens.css">
+</head>
+<body>
+<div class="frame">
+<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Compass Studio console · AI capabilities (Tier 1/2) · AI LLD Part 9.1 — click tabs; all surfaces appear only when the tenant capability flag is ON</p>
+<div style="border:0.5px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2);font-size:13px">
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border)">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;background:#EEEDFE;color:#3C3489"><i class="ti ti-compass" style="font-size:16px"></i></span>
+    <span style="font-weight:500;font-size:14px">Compass Studio</span>
+    <span style="border:0.5px solid var(--border);border-radius:var(--radius);padding:4px 10px;color:var(--text-secondary)">StraightBank web · UAT</span>
+    <span style="margin-left:auto;background:#EEEDFE;color:#3C3489;border-radius:10px;padding:3px 10px;font-size:11px">✨ AI: 6 capabilities enabled</span>
+  </div>
+  <nav id="tabs" style="display:flex;gap:2px;padding:8px 10px;border-bottom:0.5px solid var(--border)"></nav>
+  <main id="main" style="min-height:430px;padding:14px 16px;background:var(--surface-1)"></main>
+</div>
+</div>
+<script>
+const badge=(t,bg,fg)=>`<span style="background:${bg};color:${fg};font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap">${t}</span>`;
+const ai=badge("✨ AI-assisted","#EEEDFE","#3C3489"), machine=badge("Machine","#F1EFE8","#444441");
+const card=(inner,extra)=>`<div style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;${extra||""}">${inner}</div>`;
+const views={
+draft:`<div style="font-size:15px;font-weight:500;margin-bottom:10px">New guide · ✨ Draft with AI (A1)</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+${card(`<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Source document (pasted SOP)</div>
+<div style="background:var(--surface-1);border-radius:var(--radius);padding:10px;font-size:11.5px;color:var(--text-secondary);line-height:1.7;height:230px;overflow:hidden">SOP-114 · International transfers<br>1. Navigate to Payments → International.<br>2. Enter the recipient IBAN and verify the country prefix.<br>3. Enter amount; system displays correspondent charges.<br>4. Review SHA/OUR charge option with the customer…<br><span style="color:var(--text-muted)">(2 pages)</span></div>
+<button style="margin-top:10px;width:100%">✨ Generate draft</button>`)}
+${card(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-weight:500">Generated draft · First international transfer</span>${ai}</div>
+${[["s1 · Open the payments menu","the Payments menu item"],["s2 · Choose International","the International transfer option"],["s3 · Enter recipient IBAN","the IBAN input field"],["s4 · Review charges","the charges summary panel"],["s5 · Submit the transfer","the Submit transfer button"]].map(s=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:0.5px solid var(--border);border-radius:var(--radius);margin-bottom:6px"><span style="flex:1;font-size:12px">${s[0]}</span><span style="background:#FAEEDA;color:#633806;font-size:10.5px;padding:2px 8px;border-radius:10px"><i class="ti ti-crosshair" style="font-size:11px;vertical-align:-1px"></i> needs capture: "${s[1]}"</span></div>`).join("")}
+<div style="display:flex;gap:8px;margin-top:8px"><button style="flex:1;background:var(--fill-primary);color:var(--on-primary);border:none">Capture walk in extension</button><button style="flex:1" disabled title="Blocked while capture chips remain">Submit for review</button></div>
+<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Submission is blocked until every anchor hint is captured on the live page.</div>`)}
+</div>`,
+qa:`<div style="font-size:15px;font-weight:500;margin-bottom:10px">Review queue · Quarterly NPS survey v3 — ✨ QA copilot (A4)</div>
+${card(`<div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">Findings</span><span style="font-size:11px;color:var(--text-muted)">advisory only — the checker decides</span></div>
+<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Deterministic checks</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px">
+${badge("✔ all steps reachable","#E1F5EE","#085041")}${badge("✔ alt text present","#E1F5EE","#085041")}${badge("⚠ Arabic missing for 2 strings","#FAEEDA","#633806")}</div>
+<div style="font-size:12px;color:var(--text-muted)">AI-suggested (tone guide v4 · banned-claims list)</div>
+<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-size:12px"><span style="background:#EEEDFE;color:#3C3489;border-radius:8px;padding:1px 7px;font-size:10.5px;margin-right:8px">tone §2.3</span>Step s2: "You must complete…" → suggest plain-language "Please complete…" <button style="font-size:11px;padding:3px 9px;margin-left:8px">Apply</button></div>
+<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-size:12px"><span style="background:#FCEBEB;color:#791F1F;border-radius:8px;padding:1px 7px;font-size:10.5px;margin-right:8px">claims</span>Intro: "guaranteed fastest transfer" matches banned-claims pattern — rephrase or route to compliance</div>
+</div>`)}
+<div style="margin-top:10px">${card(`<div style="display:flex;gap:8px"><button style="border-color:var(--border-success);color:var(--text-success)">Approve</button><button style="border-color:var(--border-danger);color:var(--text-danger)">Reject with comment</button><span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Findings never block — governance stays with the checker</span></div>`)}</div>`,
+trans:`<div style="font-size:15px;font-weight:500;margin-bottom:10px">Translations · First international transfer — ✨ Pre-fill Arabic (A3)</div>
+${card(`<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
+<tr style="color:var(--text-muted);text-align:left"><th style="padding:6px 8px;width:20%">Key</th><th style="padding:6px 8px">English</th><th style="padding:6px 8px">Arabic</th><th style="padding:6px 8px;width:13%">Status</th><th style="padding:6px 8px;width:12%">Glossary</th></tr>
+<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 8px">t.s3.title</td><td style="padding:6px 8px">Enter the recipient IBAN</td><td style="padding:6px 8px" dir="rtl">أدخل رقم الآيبان للمستلم</td><td style="padding:6px 8px">${machine}</td><td style="padding:6px 8px">${badge("✔ IBAN","#E1F5EE","#085041")}</td></tr>
+<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 8px">t.s4.body</td><td style="padding:6px 8px">Review the SHA charge option</td><td style="padding:6px 8px;color:var(--text-muted)" dir="rtl">—</td><td style="padding:6px 8px">${badge("glossary_miss","#FCEBEB","#791F1F")}</td><td style="padding:6px 8px">${badge("SHA ?","#FAEEDA","#633806")}</td></tr>
+<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 8px">t.s5.title</td><td style="padding:6px 8px">Submit the transfer</td><td style="padding:6px 8px" dir="rtl">إرسال الحوالة</td><td style="padding:6px 8px">${machine}</td><td style="padding:6px 8px">${badge("✔","#E1F5EE","#085041")}</td></tr>
+</table>
+<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Glossary-miss rows are left empty rather than forcing a wrong term. Human linguistic review is still required to reach Approved.</div>
+<div style="display:flex;gap:8px;margin-top:8px"><button>✨ Pre-fill remaining</button><button>Preview RTL</button><button>Send to review</button></div>`)}`,
+insights:`<div style="font-size:15px;font-weight:500;margin-bottom:10px">Insights · ✨ Ask about your data (B3) + survey themes (B4)</div>
+<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:12px">
+${card(`<div style="display:flex;gap:8px"><input style="flex:1" value="Why did step 3 completion drop last week?"><button>Ask</button></div>
+<div style="margin-top:10px;background:var(--surface-1);border-radius:var(--radius);padding:10px">
+<div style="display:flex;gap:14px;font-size:12px"><div><div style="color:var(--text-muted)">s3 completion (this wk)</div><div style="font-size:20px;font-weight:500">83%</div></div><div><div style="color:var(--text-muted)">prior wk</div><div style="font-size:20px;font-weight:500">91%</div></div><div><div style="color:var(--text-muted)">anchor-fail rate s3</div><div style="font-size:20px;font-weight:500;color:var(--text-danger)">4.1%</div></div></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-top:8px">Completion at s3 fell from 91% to 83%. The drop coincides with an s3 anchor-fail rate of 4.1%, concentrated after Tuesday's host release — consistent with anchor drift rather than user behavior.</div>
+<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px"><i class="ti ti-info-circle" style="font-size:11px;vertical-align:-1px"></i> How I answered: catalog query <span style="font-family:var(--font-mono)">step_drop_compare(g=gd_x7k2, st=s3, wk vs wk-1)</span> — narration uses result numbers only.</div></div>
+<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">${["funnels","drop-off","locale compare","trends","struggle pages"].map(c=>badge(c,"#E6F1FB","#0C447C")).join("")}</div>`)}
+${card(`<div style="font-weight:500;margin-bottom:8px">Survey themes · Q3 NPS <span style="font-size:11px;color:var(--text-muted)">(✨ B4, nightly)</span></div>
+${[["Charges unclear at review step","31","↑"],["Arabic labels truncated","12","↑"],["Praise: faster than branch","28","→"]].map(t=>`<div style="border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;margin-bottom:6px"><div style="display:flex;gap:8px;font-size:12.5px"><span style="font-weight:500;flex:1">${t[0]}</span><span>${t[1]}</span><span style="color:var(--text-muted)">${t[2]}</span></div><div style="font-size:11px;color:var(--text-muted);margin-top:3px">"didn't expect the extra fee at the end…" · "الرسوم غير واضحة"</div></div>`).join("")}
+<a href="#" onclick="event.preventDefault()" style="font-size:11.5px">View underlying responses (scrubbed)</a>`)}
+</div>`};
+const tabs=[["draft","✨ Draft with AI"],["qa","QA copilot"],["trans","AI translations"],["insights","Insights copilot"]];
+const tabsEl=document.getElementById("tabs"),mainEl=document.getElementById("main");
+function go(k){mainEl.innerHTML=views[k];[...tabsEl.children].forEach(b=>{const on=b.dataset.k===k;b.style.background=on?"var(--surface-1)":"transparent";b.style.fontWeight=on?"500":"400";});}
+tabs.forEach(t=>{const b=document.createElement("button");b.dataset.k=t[0];b.textContent=t[1];b.style.cssText="border:none;background:transparent;padding:7px 12px;border-radius:var(--radius);font-size:13px;cursor:pointer";b.onclick=()=>go(t[0]);tabsEl.appendChild(b);});
+go("draft");
+</script>
+</body>
+</html>

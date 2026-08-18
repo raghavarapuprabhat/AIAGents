@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compass in-app AI assistant — mockup (AI LLD Part 9.2)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.30.0/tabler-icons.min.css">
+<link rel="stylesheet" href="_tokens.css">
+</head>
+<body>
+<div class="frame">
+<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Compass C1 assistant on a banking page · AI LLD Part 9.2 — try the two question chips (grounded vs. off-topic); "Show me" hands off to the Phase-1 walk-thru</p>
+<div style="border:0.5px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2);font-size:13px;position:relative">
+  <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:0.5px solid var(--border);background:var(--surface-1)">
+    <span style="display:flex;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:#F09595"></span><span style="width:9px;height:9px;border-radius:50%;background:#FAC775"></span><span style="width:9px;height:9px;border-radius:50%;background:#9FE1CB"></span></span>
+    <span style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--text-muted)">straightbank.internal/payments/international</span>
+  </div>
+  <div style="display:flex;min-height:430px">
+    <div style="flex:1;min-width:0;padding:16px;position:relative">
+      <div style="font-size:15px;font-weight:500">International transfer</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">StraightBank · payments</div>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:380px">
+        <div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Recipient IBAN</div><input id="iban" value="AE07 0331" style="width:100%;font-family:var(--font-mono);font-size:12px;border-color:#F09595"></div>
+        <div style="font-size:11px;color:var(--text-danger)">Invalid IBAN — check the country prefix (3rd attempt)</div>
+        <div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Amount</div><input value="12,500.00" style="width:100%"></div>
+        <button id="submitBtn" style="align-self:flex-start;background:var(--fill-primary);color:var(--on-primary);border:none;padding:8px 18px">Submit transfer</button>
+      </div>
+      <!-- B2 struggle toast -->
+      <div id="toast" style="position:absolute;left:16px;bottom:14px;background:var(--surface-2);border:0.5px solid var(--border-strong);border-radius:var(--radius);padding:9px 12px;font-size:12px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 14px rgba(30,39,97,0.12)">
+        <i class="ti ti-lifebuoy" style="font-size:16px;color:#3C3489"></i>
+        <span>Having trouble with this form? <a href="#" onclick="event.preventDefault();launchFlow()">See the walk-through</a></span>
+        <button onclick="this.parentElement.style.display='none'" style="border:none;padding:2px 6px;font-size:12px;color:var(--text-muted)">✕</button>
+      </div>
+      <div style="position:absolute;left:16px;bottom:-8px;font-size:10px;color:var(--text-muted)">↑ B2 struggle offer — a normal announcement widget targeted by the struggle env var; dismiss = standard frequency capping</div>
+      <!-- spotlight demo overlays (hidden until launch) -->
+      <div id="dim" style="display:none;position:absolute;inset:0;background:rgba(20,24,54,0.45)"></div>
+      <div id="steptip" style="display:none;position:absolute;left:150px;top:150px;width:250px;background:var(--surface-2);border-radius:10px;padding:10px 12px;box-shadow:0 6px 18px rgba(0,0,0,0.25);font-size:12px;z-index:3">
+        <div style="font-weight:600;margin-bottom:4px">Step 1 of 5 · Enter recipient IBAN</div>
+        <div style="color:var(--text-secondary)">Start with the 2-letter country code, e.g. AE for the UAE.</div>
+        <div style="display:flex;gap:6px;margin-top:8px"><button style="font-size:11px;padding:3px 10px">Exit</button><button style="font-size:11px;padding:3px 10px;background:var(--fill-primary);color:var(--on-primary);border:none;margin-left:auto">Next</button></div>
+      </div>
+    </div>
+    <!-- C1 assistant panel -->
+    <aside style="width:270px;flex:none;border-left:0.5px solid var(--border);background:var(--surface-1);display:flex;flex-direction:column">
+      <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#EEEDFE;color:#3C3489"><i class="ti ti-sparkles" style="font-size:13px"></i></span>
+        <div><div style="font-size:12.5px;font-weight:600">Help</div><div style="font-size:10px;color:var(--text-muted)">AI · answers from your organisation's guides</div></div>
+      </div>
+      <div id="chat" style="flex:1;padding:10px;overflow:auto;display:flex;flex-direction:column;gap:8px;font-size:12px">
+        <div style="align-self:flex-start;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:8px 10px;max-width:92%">Hi — ask me how to do anything in this application.</div>
+      </div>
+      <div style="padding:8px 10px;border-top:0.5px solid var(--border)">
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <button onclick="ask('grounded')" style="font-size:11px;padding:4px 9px">How do I reverse a payment?</button>
+          <button onclick="ask('offtopic')" style="font-size:11px;padding:4px 9px">Which stock should I buy?</button>
+        </div>
+        <div style="display:flex;gap:6px"><input placeholder="Ask a question…" style="flex:1;font-size:12px"><button style="font-size:12px">Send</button></div>
+        <div style="font-size:9.5px;color:var(--text-muted);margin-top:6px;display:flex;gap:8px"><span>👍 👎 feedback logged</span><a href="#" onclick="event.preventDefault()" style="margin-left:auto">Contact support</a></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</div>
+<script>
+const chat=document.getElementById("chat");
+function bubble(html,me){const d=document.createElement("div");d.style.cssText=`align-self:${me?"flex-end":"flex-start"};background:${me?"#1E2761":"var(--surface-2)"};color:${me?"#fff":"inherit"};border:0.5px solid var(--border);border-radius:10px;padding:8px 10px;max-width:92%`;d.innerHTML=html;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d;}
+function typing(){return bubble('<span style="color:var(--text-muted)">Thinking… <span style="font-size:10px">(usually under 6 s)</span></span>');}
+function ask(kind){
+  if(kind==='grounded'){
+    bubble("How do I reverse a payment?",true);
+    const t=typing();
+    setTimeout(()=>{t.remove();
+      bubble(`Go to <b>Payments → History</b>, open the payment, and choose <b>Request reversal</b>. Reversals are only possible while the status is <i>Processing</i>; once <i>Settled</i>, raise a recall request instead.
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <span style="background:#E6F1FB;color:#0C447C;border-radius:10px;padding:2px 8px;font-size:10.5px"><i class="ti ti-file-text" style="font-size:11px;vertical-align:-1px"></i> Reversing a payment</span>
+        <span style="background:#E6F1FB;color:#0C447C;border-radius:10px;padding:2px 8px;font-size:10.5px"><i class="ti ti-file-text" style="font-size:11px;vertical-align:-1px"></i> Payment recalls</span>
+      </div>
+      <button onclick="launchFlow()" style="margin-top:8px;font-size:11.5px;padding:4px 12px;background:#1E2761;color:#fff;border:none;border-radius:8px">▶ Show me</button>
+      <div style="font-size:9.5px;color:var(--text-muted);margin-top:6px">Answered from 2 published guides · AI-generated</div>`);
+    },900);
+  } else {
+    bubble("Which stock should I buy?",true);
+    const t=typing();
+    setTimeout(()=>{t.remove();
+      bubble(`I can only help with using this application — I don't have guidance on that, and I can't give financial advice. <a href="#" onclick="event.preventDefault()">Contact support</a> if you need help from a person.`);
+    },700);
+  }
+}
+function launchFlow(){
+  document.getElementById("toast").style.display="none";
+  document.getElementById("dim").style.display="block";
+  const ib=document.getElementById("iban"); ib.style.position="relative"; ib.style.zIndex=3; ib.style.background="#fff";
+  document.getElementById("steptip").style.display="block";
+  bubble('<span style="color:var(--text-muted)">Launching the walk-through — this is the standard Phase-1 flow engine taking over.</span>');
+}
+</script>
+</body>
+</html>
